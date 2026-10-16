@@ -218,19 +218,14 @@ export class SharedTown {
         throw new HttpError(409, '此请求编号已用于另一项操作。');
       return { id: existing.id, state: existing.status };
     }
-    if (!this.configured()) throw new HttpError(503, '模型尚未配置，暂时只能围观。');
-    if (this.store.get('paused') === 'true')
-      throw new HttpError(503, '管理员已暂停小镇，请稍后参与。');
+    if (!this.configured()) throw new HttpError(503, '小镇暂时无法互动，请稍后再来。');
+    if (this.store.get('paused') === 'true') throw new HttpError(503, '小镇暂时休息，请稍后再来。');
     const budget = this.budget();
-    if (budget.resetsAt > this.now())
-      throw new HttpError(
-        429,
-        `全站模型额度已用完，${new Date(budget.resetsAt).toISOString()} 恢复。`,
-      );
+    if (budget.resetsAt > this.now()) throw new HttpError(429, '全站互动额度已用完，请稍后再来。');
     const quota = this.quota(identity);
-    if (quota.nextAt > this.now()) throw new HttpError(429, '请间隔 10 秒再提交，草稿已保留。');
+    if (quota.nextAt > this.now()) throw new HttpError(429, '请间隔 10 秒再发送。');
     if (quota.usedHour >= this.limits.visitorHour || quota.usedDay >= this.limits.visitorDay)
-      throw new HttpError(429, '你的匿名参与额度已用完，请稍后再来。');
+      throw new HttpError(429, '互动次数已达上限，请稍后再来。');
     if (this.count('ip=? AND created>?', identity.ip, this.now() - hour) >= this.limits.ipHour)
       throw new HttpError(429, '当前网络参与较频繁，请稍后再来。');
     if (
@@ -239,7 +234,7 @@ export class SharedTown {
     )
       throw new HttpError(429, '你已有 2 项未完成操作，请稍候。');
     if (this.count("status IN ('pending','running')") >= this.limits.queue)
-      throw new HttpError(429, '小镇等待队列已满，请稍后再来。');
+      throw new HttpError(429, '队列已满，请稍后再来。');
     let resolved = action;
     if (action.type === 'retry') {
       const previous = this.store.db
@@ -417,7 +412,7 @@ export class SharedTown {
     } catch (e) {
       if (controller.signal.aborted || this.closed || this.active !== task) return;
       // Never expose provider response bodies, SQL diagnostics, or server credentials.
-      const error = e instanceof HttpError ? e.message : '模型回应失败，已保留现场。可以手动重试。';
+      const error = e instanceof HttpError ? e.message : '暂时无法回应，请重试。';
       if (task.kind === 'human')
         this.store.db
           .prepare("UPDATE commands SET status='failed', error=? WHERE id=?")

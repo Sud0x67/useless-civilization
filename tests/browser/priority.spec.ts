@@ -92,7 +92,10 @@ test('human conversations and events run FIFO, preserve drafts, and resume after
   page,
 }) => {
   await live(page);
-  await page.clock.install();
+  const clockStart = new Date();
+  await page.clock.install({ time: clockStart });
+  // Hold simulation time while checking FIFO behavior, independent of CI speed.
+  await page.clock.pauseAt(new Date(clockStart.getTime() + 1000));
   const first = gate(),
     weather = gate();
   const calls: { type: string; data: any }[] = [];
@@ -210,9 +213,7 @@ test('a conversation survives hidden-tab suspension without duplicating the ques
     Object.defineProperty(document, 'hidden', { configurable: true, value: true });
     document.dispatchEvent(new Event('visibilitychange'));
   });
-  await expect(page.getByRole('region', { name: '人类操作队列' })).toContainText(
-    '等待返回当前世界后继续',
-  );
+  await expect(page.getByRole('region', { name: '人类操作队列' })).toContainText('回放中');
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
     document.dispatchEvent(new Event('visibilitychange'));

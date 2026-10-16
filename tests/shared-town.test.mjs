@@ -129,7 +129,7 @@ describe('shared authoritative town', () => {
     town.accept(identity, chat());
     await flush();
     time += 10001;
-    expect(() => town.accept(identity, chat())).toThrow('参与额度');
+    expect(() => town.accept(identity, chat())).toThrow('次数已达上限');
     expect(() => town.accept({ owner: 'new-cookie', ip: identity.ip }, chat())).toThrow('当前网络');
     const res = {
       setHeader(k, value) {
@@ -259,7 +259,7 @@ describe('shared authoritative town', () => {
     await flush();
     expect(town.version).toBe(version);
     expect(town.world.conversations).toHaveLength(0);
-    expect(() => town.accept(bob, chat())).toThrow('管理员已暂停');
+    expect(() => town.accept(bob, chat())).toThrow('小镇暂时休息');
     const dir = mkdtempSync(join(tmpdir(), 'town-backup-'));
     dirs.push(dir);
     const path = join(dir, 'backup.sqlite');

@@ -176,7 +176,6 @@ export function App() {
       ownTasks.filter((t) => t.state !== 'failed').length >=
         (sharedData?.limits.perVisitorPending || 2)
     : humanTasks.length >= scheduler.limit;
-  const [usage, setUsage] = useState({ calls: 0, input: 0, output: 0 });
   const [modal, setModal] = useState<Modal>(null);
   const [night, setNight] = useState(true);
   const [notice, setNotice] = useState('');
@@ -203,7 +202,7 @@ export function App() {
       utterance.lang = 'zh-CN';
       window.speechSynthesis.speak(utterance);
     } catch {
-      setNotice('回复已保存，当前浏览器暂时无法朗读。');
+      setNotice('当前浏览器无法朗读。');
     }
   }, [sharedData, sound, selected]);
 
@@ -300,20 +299,15 @@ export function App() {
         action.type === 'chat'
           ? (() => {
               const parsed = DecisionSchema.safeParse(result.decision);
-              if (!parsed.success) throw new Error('模型没有返回完整、有效的决策，请重试。');
+              if (!parsed.success) throw new Error('暂时无法回应，请重试。');
               return applyChatReply(current, action.agentId, parsed.data, action.messageId!);
             })()
           : (() => {
               const parsed = RoundSchema.safeParse(result.round);
-              if (!parsed.success) throw new Error('模型没有返回完整、有效的决策，请重试。');
+              if (!parsed.success) throw new Error('暂时无法回应，请重试。');
               return applyRound(current, parsed.data);
             })();
       commit(next);
-      setUsage((old) => ({
-        calls: old.calls + 1,
-        input: old.input + Math.max(0, Number(result.usage?.input) || 0),
-        output: old.output + Math.max(0, Number(result.usage?.output) || 0),
-      }));
       if (action.type === 'chat' && sound && 'speechSynthesis' in window) {
         try {
           const speech = new SpeechSynthesisUtterance(
@@ -322,7 +316,7 @@ export function App() {
           speech.lang = 'zh-CN';
           window.speechSynthesis.speak(speech);
         } catch {
-          setNotice('回复已保存，当前浏览器暂时无法朗读。');
+          setNotice('当前浏览器无法朗读。');
         }
       }
     } catch (error) {
@@ -349,23 +343,17 @@ export function App() {
       const accepted = await shared.command(action);
       if (accepted) {
         pause(false);
-        setNotice('已加入共享队列，所有人都能看到这次互动。');
       }
       return accepted;
     }
     if (replayRef.current !== null || !status?.configured) return false;
     const task = scheduler.enqueue(action);
     if (!task) {
-      setNotice('等待队列已满，请稍后再提交。草稿已保留。');
+      setNotice('暂时无法发送，请稍后再试。');
       return false;
     }
     firstRound.current = true;
     idleSince.current = Date.now();
-    setNotice(
-      scheduler.getSnapshot().active?.id === task.id
-        ? '已优先处理，无需暂停小镇。'
-        : '已加入等待队列，将依次处理。',
-    );
     return true;
   }
 
@@ -379,13 +367,13 @@ export function App() {
       .then((data: Status) => {
         setStatus(data);
         if (!data.configured) {
-          setConnectionError('尚未配置模型。请填写服务器 .env 后重启。');
+          setConnectionError('小镇暂时无法互动，请稍后再来。');
           pause(true);
         }
       })
       .catch(() => {
         if (!abort.signal.aborted) {
-          setConnectionError('无法连接本地服务器，请检查服务是否运行。');
+          setConnectionError('连接中断，请刷新重试。');
           pause(true);
         }
       });
@@ -437,7 +425,7 @@ export function App() {
     const interval = setInterval(() => {
       if (Date.now() - idleSince.current > 600000) {
         pause(true);
-        setNotice('已观察 10 分钟，自动暂停。继续时再调用模型。');
+        setNotice('观察已暂停。');
         return;
       }
       void run();
@@ -480,7 +468,6 @@ export function App() {
       snapshotsRef.current = history;
       setSnapshots(history);
     }
-    setNotice('已返回当前世界。');
   }
   async function event(id: EventId) {
     if (await submit({ type: 'event', eventId: id })) setModal(null);
@@ -493,12 +480,12 @@ export function App() {
     a.download = `starfall-day${formatDay(world.minute)}-${world.tick}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setNotice('回放已导出，不包含模型配置或密钥。');
+    setNotice('回放已导出。');
   }
   async function upload(input: File | undefined) {
     if (!input) return;
     if (sharedMode) {
-      setNotice('共享世界只允许管理员导入存档。');
+      setNotice('仅管理员可导入回放。');
       return;
     }
     try {
@@ -518,7 +505,7 @@ export function App() {
       setReplay(0);
       setModal(null);
       setConnectionError('');
-      setNotice('回放已导入，自动运行已暂停。返回当前世界后可以继续。');
+      setNotice('回放已导入。');
     } catch (e) {
       setNotice(e instanceof Error ? e.message : '无法导入回放。');
     } finally {
@@ -527,7 +514,7 @@ export function App() {
   }
   function reset() {
     if (sharedMode) {
-      setNotice('共享世界只允许管理员重置。');
+      setNotice('仅管理员可重置小镇。');
       return;
     }
     cancel();
@@ -544,7 +531,7 @@ export function App() {
     setReplay(null);
     setConnectionError('');
     setModal(null);
-    setNotice('世界已重置。点击播放，等待模型为居民做出第一轮决定。');
+    setNotice('小镇已重置。');
   }
   const stateLabel =
     replay !== null
@@ -552,8 +539,8 @@ export function App() {
       : busy
         ? schedule.active?.kind === 'human'
           ? sharedMode
-            ? '正在回应人类互动'
-            : '正在回应你的操作'
+            ? '居民回应中'
+            : '居民回应中'
           : '居民思考中'
         : !visible
           ? '页面已休眠'
@@ -593,7 +580,7 @@ export function App() {
         <div className="top-actions">
           <span className="model-badge">
             <Icon name="spark" size={13} />
-            <span>{status?.model || '连接模型中'}</span>
+            <span>{status?.model || 'AI 居民'}</span>
           </span>
           <ToolButton label="世界设置" icon="settings" onClick={() => setModal('settings')} />
         </div>
@@ -626,7 +613,7 @@ export function App() {
                     {view.mayor === a.id && <Icon name="crown" size={12} />}
                   </span>
                   <span className="activity">
-                    {view.tick === 0 && !a.speech ? '等待第一轮模型决策' : a.activity}
+                    {view.tick === 0 && !a.speech ? '准备开始新的一天' : a.activity}
                   </span>
                   <span className="resident-location">
                     <span style={{ background: a.color }} />
@@ -651,7 +638,7 @@ export function App() {
           <div className="sidebar-footer">
             <span className="tiny-dot" />6 位 AI 居民 ·{' '}
             {sharedMode
-              ? `${sharedData?.online || 0} 个在线观察窗口`
+              ? `${sharedData?.online || 0} 位观察者`
               : view.human
                 ? '1 位人类'
                 : '0 位人类'}
@@ -829,22 +816,23 @@ export function App() {
             </div>
           </div>
           {sharedMode && (
-            <div className="shared-status" role="status" aria-label="共享小镇状态">
-              <span>{shared.connected ? '共享小镇 · 实时连接' : '连接中 · 暂时无法提交'}</span>
-              <span>
-                今日参与 {sharedData?.quota.usedDay || 0}/{sharedData?.quota.dayLimit || 60} ·
-                每小时 {sharedData?.quota.hourLimit || 20} 次 · 间隔 10 秒
-              </span>
-              <span>
-                全站今日模型 {sharedData?.budget.dayUsed || 0}/{sharedData?.budget.dayLimit || 500}{' '}
-                次
-              </span>
-              {!!sharedData?.budget.resetsAt && (
-                <span>额度恢复：{new Date(sharedData.budget.resetsAt).toLocaleString()}</span>
-              )}
-              <small>
-                聊天和事件对所有访客公开。匿名限额结合 Cookie 与 IP，累计用量保存在服务器。
-              </small>
+            <div
+              className={
+                !shared.connected || !!sharedData?.budget.resetsAt ? 'shared-status' : 'sr-only'
+              }
+              role="status"
+              aria-label="共享小镇状态"
+            >
+              {!shared.connected
+                ? '正在重连…'
+                : sharedData?.budget.resetsAt
+                  ? `互动暂时休息，${new Date(sharedData.budget.resetsAt).toLocaleString([], {
+                      month: 'numeric',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })} 恢复。`
+                  : '已连接'}
             </div>
           )}
           {humanPending && (
@@ -853,13 +841,13 @@ export function App() {
                 <Icon name="people" size={15} />
                 <strong>
                   {schedule.suspended
-                    ? '等待返回当前世界后继续'
+                    ? '回放中'
                     : schedule.failed
-                      ? '回应失败，等待重试'
+                      ? '回应失败'
                       : schedule.active?.kind === 'human'
                         ? sharedMode
-                          ? '正在处理共享互动'
-                          : '正在处理你的操作'
+                          ? '居民回应中'
+                          : '居民回应中'
                         : '等待处理'}
                 </strong>
                 <small>{schedule.waiting.length} 项等待</small>
@@ -904,10 +892,7 @@ export function App() {
           {error && (
             <div className="error-banner" role="alert">
               <Icon name="info" size={17} />
-              <span>
-                {error}
-                <small>世界状态已保留，未使用预设对白。</small>
-              </span>
+              <span>{error}</span>
               <button
                 onClick={() => {
                   if (!status?.configured) {
@@ -925,7 +910,13 @@ export function App() {
                 }}
                 disabled={busy || schedule.suspended}
               >
-                {status?.configured ? '重试' : '查看配置'}
+                {!status?.configured
+                  ? '了解小镇'
+                  : sharedMode && shared.error && !schedule.failed
+                    ? '知道了'
+                    : sharedMode && sharedData?.autoError && !schedule.failed
+                      ? '发起互动'
+                      : '重试'}
                 <Icon name="refresh" size={13} />
               </button>
               {schedule.failed?.kind === 'human' && (
@@ -945,9 +936,7 @@ export function App() {
                 <Icon name="history" size={14} />
                 世界回放
               </span>
-              <small>
-                {snapshots.length} 个瞬间 · {sharedMode ? '共享世界已自动存档' : '仅保存在内存'}
-              </small>
+              <small>{snapshots.length} 个瞬间</small>
               {replay !== null && (
                 <button onClick={leaveReplay}>
                   返回当前世界
@@ -972,21 +961,9 @@ export function App() {
               <ToolButton label="导出回放" icon="download" onClick={download} />
             </div>
           </div>
-          <div className="world-footnote">
-            <span>
-              <Icon name="spark" size={12} />
-              居民的每次决定，来自真实模型。
-            </span>
-            <span>
-              {busy
-                ? '正在等待模型响应…'
-                : paused
-                  ? '点击播放继续观察'
-                  : sharedMode
-                    ? '全镇共享进度 · 暂停仅影响自己观看'
-                    : `每 ${intervals[speed] / 1000} 秒尝试一轮 · 每轮 15 分钟`}
-            </span>
-          </div>
+          {replay !== null && (
+            <div className="world-footnote">回放中，返回当前世界后可继续互动。</div>
+          )}
         </section>
 
         <aside className="activity-panel">
@@ -1196,17 +1173,7 @@ export function App() {
         <span>
           useless-llm.com<span className="bottom-slash">/</span>一个关于 AI 和人类的无用实验
         </span>
-        <span>
-          无脚本对白
-          <span className="tiny-dot" />
-          {sharedMode ? sharedData?.usage.calls || 0 : usage.calls} 次调用
-          <span className="tiny-dot" />
-          {(sharedMode
-            ? (sharedData?.usage.input || 0) + (sharedData?.usage.output || 0)
-            : usage.input + usage.output
-          ).toLocaleString()}{' '}
-          tokens
-        </span>
+        <span>六位居民，一座小镇。</span>
       </footer>
       {notice && (
         <div className="toast" role="status">
@@ -1253,15 +1220,11 @@ export function App() {
               </button>
             ))}
           </div>
-          <p className="modal-footnote">
-            {sharedMode && shared.error
-              ? shared.error
-              : queueFull
-                ? sharedMode
-                  ? '你已有待处理操作，请等待完成后继续。'
-                  : '等待队列已满（最多 12 项），请等待完成或取消部分操作。'
-                : '提交后自动请求居民回应，无需暂停。连续投放将按顺序处理。'}
-          </p>
+          {(queueFull || (sharedMode && shared.error)) && (
+            <p className="modal-footnote">
+              {sharedMode && shared.error ? shared.error : '请等待当前互动结束后再试。'}
+            </p>
+          )}
         </ModalShell>
       )}
       {modal === 'settings' && (
@@ -1279,36 +1242,24 @@ export function App() {
             <div>
               <Icon name="spark" />
               <h3>制造一点意外</h3>
-              <p>随时投放事件或发送消息。人类操作优先，连续提交会依次处理，无需先暂停。</p>
+              <p>和居民聊聊天，或给小镇投放一个事件。</p>
             </div>
           </div>
           <div className="settings-model">
-            <span className="eyebrow">MODEL CONNECTION</span>
-            <h3>
-              <span className={`status-dot ${status?.configured ? '' : 'off'}`} />
-              {status?.model || '模型未配置'}
-            </h3>
-            <p>
-              {status?.wireApi || 'responses'} API ·
-              每轮一个请求，为六位居民共同决策。失败会暂停，不生成替代对白。
-            </p>
-            {!status?.configured && (
+            <span className="eyebrow">ABOUT THIS TOWN</span>
+            <h3>一座大家共同参与的小镇</h3>
+            <p>对话和事件会向所有访客展示，请勿输入隐私信息。</p>
+            <small>暂停与回放只影响你的观看。</small>
+            {sharedData && (
               <p>
-                在项目根目录的 <code>.env</code> 中设置 <code>LLM_BASE_URL</code>、
-                <code>LLM_MODEL</code>、<code>LLM_API_KEY</code>，然后重启 <code>npm run dev</code>
-                。
+                今日互动 {sharedData.quota.usedDay}/{sharedData.quota.dayLimit} · 每小时最多{' '}
+                {sharedData.quota.hourLimit} 次
               </p>
             )}
-            <small>
-              {sharedMode
-                ? '密钥仅在服务器。所有人的对话与事件公开；暂停观看、回放、关闭页面不影响别人。无人观看时停止自动推进。'
-                : '密钥仅留在本地服务器。页面隐藏或观察 10 分钟无操作时停止调用。回放期间不调用模型。'}
-            </small>
           </div>
           <div className="settings-row">
             <span>
               <strong>朗读对话回复</strong>
-              <small>使用浏览器内置语音，默认关闭</small>
             </span>
             <button
               className={`toggle ${sound ? 'on' : ''}`}
@@ -1329,34 +1280,28 @@ export function App() {
               <Icon name="download" size={15} />
               导出回放
             </button>
-            <button
-              className="secondary-button"
-              disabled={sharedMode}
-              onClick={() => file.current?.click()}
-            >
-              <Icon name="upload" size={15} />
-              导入回放
-            </button>
-            <button
-              className="danger-button"
-              disabled={sharedMode}
-              onClick={() => setModal('reset')}
-            >
-              <Icon name="refresh" size={15} />
-              重置世界
-            </button>
+            {!sharedMode && (
+              <button className="secondary-button" onClick={() => file.current?.click()}>
+                <Icon name="upload" size={15} />
+                导入回放
+              </button>
+            )}
+            {!sharedMode && (
+              <button className="danger-button" onClick={() => setModal('reset')}>
+                <Icon name="refresh" size={15} />
+                重置世界
+              </button>
+            )}
           </div>
           <p className="modal-footnote">
-            {sharedMode
-              ? '小镇由服务器 SQLite 自动保存，刷新后继续同一座小镇。匿名访客可以参与，管理操作由站点管理员执行。'
-              : '世界只保存在本页内存，刷新后重新开始。请导出回放以保存进展。此预览尚未绑定域名。'}
+            {sharedMode ? '进度自动保存。' : '导出回放可保存当前进度。'}
           </p>
         </ModalShell>
       )}
       {modal === 'reset' && (
         <ModalShell
           title="重新开始这一天？"
-          subtitle="当前世界与内存中的回放会被清除。可以先导出留念。"
+          subtitle="当前进度会被清除。"
           onClose={() => setModal(null)}
         >
           <div className="reset-actions">

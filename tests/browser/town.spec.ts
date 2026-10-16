@@ -30,7 +30,7 @@ async function mock(page: Page, failFirst = false) {
   });
   await page.goto('/');
   if (!failFirst) {
-    await expect(page.locator('.bottom-bar')).toContainText('1 次调用');
+    await expect(page.locator('.clock')).toContainText('08:15');
     await page.getByRole('button', { name: '暂停观察', exact: true }).click();
   }
   return { rounds, chats, external, errors };
@@ -192,11 +192,11 @@ test('missing model configuration never starts a local simulation', async ({ pag
     return r.abort();
   });
   await page.goto('/');
-  await expect(page.getByRole('alert')).toContainText('尚未配置模型');
+  await expect(page.getByRole('alert')).toContainText('小镇暂时无法互动');
   await expect(page.locator('.clock')).toContainText('08:00');
   await expect(page.getByRole('button', { name: '开始观察', exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: '查看配置', exact: true }).click();
-  await expect(page.getByRole('dialog')).toContainText('LLM_API_KEY');
+  await page.getByRole('button', { name: '了解小镇', exact: true }).click();
+  await expect(page.getByRole('dialog')).not.toContainText(/LLM_|SQLite|Cookie|API|\.env/);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(calls).toBe(0);
@@ -219,7 +219,7 @@ test('hidden tab suspends automatic requests; visible tab can resume', async ({ 
   });
   await expect(page.locator('.top-center')).toContainText('世界运行中');
   await page.clock.fastForward(21000);
-  await expect(page.locator('.bottom-bar')).toContainText('2 次调用');
+  await expect(page.locator('.clock')).toContainText('08:30');
   await page.getByRole('button', { name: '暂停观察', exact: true }).click();
 });
 
@@ -294,7 +294,7 @@ test('invalid client-side model data cannot partially advance the world', async 
     }),
   );
   await page.goto('/');
-  await expect(page.getByRole('alert')).toContainText('模型没有返回完整、有效的决策');
+  await expect(page.getByRole('alert')).toContainText('暂时无法回应');
   await expect(page.locator('.clock')).toContainText('08:00');
   await expect(page.locator('.feed-item')).toHaveCount(1);
 });

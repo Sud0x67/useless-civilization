@@ -38,7 +38,7 @@ async function open(browser: Browser) {
   const page = await context.newPage();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto(base);
-  await expect(page.getByLabel('共享小镇状态')).toContainText('实时连接');
+  await expect(page.getByLabel('共享小镇状态')).toContainText('已连接');
   await page.getByRole('button', { name: '选择居民米拉', exact: true }).click();
   return page;
 }
@@ -65,7 +65,7 @@ test('anonymous visitors share FIFO conversations and reconnect to the same save
     await expect(page.getByText('再回应 Bob', { exact: true })).toBeVisible();
   }
   await alice.reload();
-  await expect(alice.getByLabel('共享小镇状态')).toContainText('实时连接');
+  await expect(alice.getByLabel('共享小镇状态')).toContainText('已连接');
   await alice.getByRole('button', { name: '选择居民米拉', exact: true }).click();
   await expect(alice.getByText('再回应 Bob', { exact: true })).toBeVisible();
   expect(
@@ -76,6 +76,10 @@ test('anonymous visitors share FIFO conversations and reconnect to the same save
     })),
   ).toEqual({ local: 0, session: 0, cookies: '' });
   await alice.screenshot({ path: test.info().outputPath('shared-town.png'), fullPage: true });
+  await expect(alice.locator('.toast')).toHaveCount(0);
+  await expect(alice.locator('body')).not.toContainText(
+    /Cookie|SQLite|不用先暂停|人类操作优先|累计用量|tokens/,
+  );
   const cookies = await contexts[0].cookies();
   expect(cookies[0].httpOnly).toBe(true);
 });
@@ -93,8 +97,8 @@ test('personal pause freezes only that view and other visitors keep interacting'
   await alice.getByRole('button', { name: '开始观察', exact: true }).click();
   await expect(alice.getByText(decision.speech, { exact: true })).toBeVisible();
   await alice.getByRole('button', { name: '世界设置', exact: true }).click();
-  await expect(alice.getByRole('button', { name: '重置世界', exact: true })).toBeDisabled();
-  await expect(alice.getByRole('button', { name: '导入回放', exact: true })).toBeDisabled();
+  await expect(alice.getByRole('button', { name: '重置世界', exact: true })).toHaveCount(0);
+  await expect(alice.getByRole('button', { name: '导入回放', exact: true })).toHaveCount(0);
 });
 
 test('only the owner can cancel waiting work and admin pause blocks new submissions', async ({
@@ -134,13 +138,13 @@ test('quota errors preserve drafts and delayed acknowledgements do not erase new
   });
   await page.route('**/api/commands', async (route) => {
     await delayed;
-    await route.fulfill({ status: 429, json: { error: '你的匿名参与额度已用完，请稍后再来。' } });
+    await route.fulfill({ status: 429, json: { error: '互动次数已达上限，请稍后再来。' } });
   });
   await page.getByRole('textbox').fill('需要保留的草稿');
   await page.getByRole('textbox').press('Enter');
   await page.getByRole('textbox').fill('等待提交时写的新草稿');
   release.resolve();
-  await expect(page.getByRole('alert')).toContainText('额度已用完');
+  await expect(page.getByRole('alert')).toContainText('次数已达上限');
   await expect(page.getByRole('textbox')).toHaveValue('等待提交时写的新草稿');
   expect(town.world.conversations).toHaveLength(0);
   await page.unroute('**/api/commands');
@@ -157,6 +161,9 @@ test('quota errors preserve drafts and delayed acknowledgements do not erase new
   await expect.poll(() => town.world.conversations.length).toBe(2);
   await page.getByRole('textbox').fill('成功回执前写好的下一条');
   accepted.resolve();
-  await expect(page.getByLabel('共享小镇状态')).toContainText('今日参与 1/60');
+  await page.getByRole('button', { name: '世界设置', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('今日互动 1/60');
+  await expect(page.getByRole('dialog')).not.toContainText(/Cookie|SQLite|LLM_|API|服务器/);
+  await page.keyboard.press('Escape');
   await expect(page.getByRole('textbox')).toHaveValue('成功回执前写好的下一条');
 });

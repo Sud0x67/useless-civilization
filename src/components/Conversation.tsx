@@ -59,7 +59,6 @@ export function Conversation({
           <div className="conversation-empty">
             <Icon name="chat" size={25} />
             <p>和{agent.name}聊聊吧</p>
-            <small>随时发送，不需要暂停小镇。</small>
           </div>
         )}
         {entries.map((entry) => {
@@ -144,7 +143,7 @@ export function Conversation({
                 e.currentTarget.form?.requestSubmit();
             }}
             disabled={locked}
-            placeholder="随时说点什么，不用先暂停"
+            placeholder="说点什么…"
             rows={2}
           />
           <button type="submit" aria-label="发送消息" disabled={locked || full || !draft.trim()}>
@@ -152,11 +151,12 @@ export function Conversation({
           </button>
         </div>
         <span>
-          {full ? '等待队列已满，请稍后发送' : '人类操作优先 · 连续消息依次回应'} · {draft.length}
+          {full && '请稍后发送 · '}
+          {draft.length}
           /300
         </span>
         <small className="chat-shortcuts" id="chat-shortcuts">
-          Enter 发送 · Shift+Enter 换行
+          Enter 发送 · Shift+Enter 换行 · 对话公开
         </small>
       </form>
     </section>

@@ -57,7 +57,7 @@ function context(world, agentId) {
 export async function requestModel(config, { world, agentId, prompt, round = false }, signal) {
   const base = new URL(config.baseUrl);
   if (!['http:', 'https:'].includes(base.protocol))
-    throw new HttpError(503, '模型服务地址应为 HTTP 或 HTTPS。');
+    throw new HttpError(503, '小镇暂时无法互动，请稍后再来。');
   const isResponses = config.wireApi !== 'chat';
   const shape = round
     ? '返回 {"decisions":[...]}，必须为 mira,otto,lin,ada,echo,soren 各返回一个对象，每个含 agentId、action、location、speech、reason，可选 target（其他居民ID）、intent（none/praise/argue/trade/support）。'
@@ -108,11 +108,9 @@ export async function requestModel(config, { world, agentId, prompt, round = fal
       body: JSON.stringify(body),
     },
   );
-  if (!response.ok)
-    throw new HttpError(502, `模型服务返回 HTTP ${response.status}，请检查服务配置或稍后重试。`);
+  if (!response.ok) throw new HttpError(502, '暂时无法回应，请稍后重试。');
   const payload = await response.json();
-  if (payload.status === 'incomplete')
-    throw new HttpError(502, '模型输出未完成，世界已保留原状，请重试。');
+  if (payload.status === 'incomplete') throw new HttpError(502, '回应未完成，请重试。');
   const content = isResponses
     ? payload.output
         ?.flatMap((item) => item.content || [])
@@ -121,15 +119,15 @@ export async function requestModel(config, { world, agentId, prompt, round = fal
         .join('') || payload.output_text
     : payload.choices?.[0]?.message?.content;
   if (typeof content !== 'string' || content.length > 18000)
-    throw new HttpError(502, '模型没有返回可用的决策。');
+    throw new HttpError(502, '暂时无法回应，请重试。');
   let value;
   try {
     value = JSON.parse(content.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, '$1'));
   } catch {
-    throw new HttpError(502, '模型返回的决策不是有效 JSON，请重试。');
+    throw new HttpError(502, '暂时无法回应，请重试。');
   }
   const result = (round ? RoundSchema : DecisionSchema).safeParse(value);
-  if (!result.success) throw new HttpError(502, '模型返回了不支持或不完整的行动，世界已保留原状。');
+  if (!result.success) throw new HttpError(502, '暂时无法回应，请重试。');
   const usage = {
     input: Number(payload.usage?.input_tokens ?? payload.usage?.prompt_tokens ?? 0),
     output: Number(payload.usage?.output_tokens ?? payload.usage?.completion_tokens ?? 0),

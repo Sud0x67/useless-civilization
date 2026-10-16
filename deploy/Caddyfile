@@ -7,3 +7,7 @@ useless-llm.com {
         header_up X-Real-IP {remote_host}
     }
 }
+
+www.useless-llm.com {
+    redir https://useless-llm.com{uri} permanent
+}

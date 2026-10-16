@@ -28,7 +28,9 @@ try {
   await page.getByRole('button', { name: '选择居民回声' }).click();
   await page.getByLabel('对回声说句话').fill('你喜欢这场星星雨吗？');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
-  await expect(page.locator('.bottom-bar')).toContainText('3 次调用', { timeout: 40000 });
+  await expect(page.locator('.conversation-history .chat-bubble.model')).toHaveCount(1, {
+    timeout: 40000,
+  });
   await expect(page.getByRole('alert')).toHaveCount(0);
   expect(errors).toEqual([]);
   expect(responses).toHaveLength(3);

@@ -58,7 +58,7 @@ sudo systemctl enable --now useless-civilization
 curl -fsS http://127.0.0.1:4180/api/status
 ```
 
-把自己的域名 A 记录指向服务器公网 IP。Caddy 模板使用 `useless-llm.com`，请先替换成自己的域名，再安装配置。已有 Caddy 站点时合并站点块，避免覆盖其他网站。
+把自己的主域名与 `www` 的 A 记录指向服务器公网 IP。Caddy 模板使用 `useless-llm.com`，并将 `www.useless-llm.com` 统一跳转到主域名；请先替换成自己的域名，再安装配置。已有 Caddy 站点时合并站点块，避免覆盖其他网站。
 
 ```sh
 sudo cp deploy/Caddyfile /etc/caddy/Caddyfile

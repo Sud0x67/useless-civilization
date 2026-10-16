@@ -4,8 +4,9 @@ const baseURL = `http://127.0.0.1:${port}`;
 export default defineConfig({
   testDir: './tests/browser',
   fullyParallel: true,
-  workers: 3,
-  use: { baseURL, trace: 'retain-on-failure' },
+  workers: process.env.CI ? 2 : 3,
+  timeout: process.env.CI ? 60000 : 30000,
+  use: { baseURL, trace: 'retain-on-failure', reducedMotion: 'reduce' },
   projects: [
     {
       name: 'chromium',

@@ -40,7 +40,7 @@ export class TownStore {
     }
     // A model reply lost during process shutdown is never automatically charged again.
     this.db.exec(
-      "UPDATE commands SET status='failed', error='服务器重启，回应未完成。可手动重试。' WHERE status='running'",
+      "UPDATE commands SET status='failed', error='上次回应未完成，可以重试。' WHERE status='running'",
     );
     WorldSchema.parse(JSON.parse(this.get('world')));
   }

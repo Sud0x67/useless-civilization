@@ -64,7 +64,7 @@ export function ActivityFeed({
     <>
       <div className="feed-intro">
         <span className="tiny-dot" />
-        {busy ? '模型正在为六位居民做决定' : '小镇里发生的那些小事'}
+        小镇里发生的那些小事
         <span>按时间顺序</span>
       </div>
       <div

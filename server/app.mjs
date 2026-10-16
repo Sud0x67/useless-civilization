@@ -151,8 +151,7 @@ export function createHandler({
         const origin = req.headers.origin;
         if (origin && origin !== `http://${req.headers.host}` && origin !== config.publicOrigin)
           throw new HttpError(403, '只接受本站发起的模型请求。');
-        if (!configured)
-          throw new HttpError(503, '尚未配置模型。请在项目的 .env 中填写模型服务，再重启服务器。');
+        if (!configured) throw new HttpError(503, '小镇暂时无法互动，请稍后再来。');
         if (!req.headers['content-type']?.startsWith('application/json'))
           throw new HttpError(415, '请使用 JSON 请求。');
         const parsed = (
@@ -209,7 +208,7 @@ export function createHandler({
       try {
         body = await readFile(target);
       } catch {
-        throw new HttpError(404, '页面不存在，请先运行 npm run build。');
+        throw new HttpError(404, '页面不存在。');
       }
       const types = {
         '.html': 'text/html; charset=utf-8',
@@ -233,10 +232,7 @@ export function createHandler({
         return;
       }
       json(res, error instanceof HttpError ? error.status : 502, {
-        error:
-          error instanceof HttpError
-            ? error.message
-            : '模型请求失败或超时，世界已保留原状，请重试。',
+        error: error instanceof HttpError ? error.message : '回应失败或超时，请重试。',
       });
     }
   };

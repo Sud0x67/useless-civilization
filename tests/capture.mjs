@@ -27,7 +27,7 @@ await page.route('**/api/turn', (r) =>
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto('http://127.0.0.1:4180');
-await page.getByText('1 次调用', { exact: false }).waitFor();
+await page.getByText('08:15', { exact: true }).waitFor();
 await page.getByRole('button', { name: '暂停观察', exact: true }).click();
 await page.locator('canvas').waitFor();
 await page.evaluate(

@@ -16,7 +16,7 @@ export function useSharedTown(enabled: boolean, watching: boolean) {
         setData(JSON.parse(event.data));
         setConnected(true);
       } catch {
-        setError('无法读取小镇状态，请刷新重连。');
+        setError('连接中断，请刷新重试。');
       }
     };
     stream.onerror = () => setConnected(false);
@@ -62,7 +62,13 @@ export function useSharedTown(enabled: boolean, watching: boolean) {
       pending.current = null;
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : '连接中断，请重试');
+      setError(
+        e instanceof TypeError || e instanceof SyntaxError
+          ? '连接中断，请重试。'
+          : e instanceof Error
+            ? e.message
+            : '暂时无法完成，请重试。',
+      );
       return false;
     } finally {
       busy.current = false;
