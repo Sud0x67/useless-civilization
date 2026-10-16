@@ -78,7 +78,7 @@ test('anonymous visitors share FIFO conversations and reconnect to the same save
   await alice.screenshot({ path: test.info().outputPath('shared-town.png'), fullPage: true });
   await expect(alice.locator('.toast')).toHaveCount(0);
   await expect(alice.locator('body')).not.toContainText(
-    /Cookie|SQLite|不用先暂停|人类操作优先|累计用量|tokens/,
+    /Cookie|SQLite|不用先暂停|人类操作优先|累计用量|tokens|shared-test/,
   );
   const cookies = await contexts[0].cookies();
   expect(cookies[0].httpOnly).toBe(true);

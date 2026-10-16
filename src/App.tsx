@@ -580,7 +580,7 @@ export function App() {
         <div className="top-actions">
           <span className="model-badge">
             <Icon name="spark" size={13} />
-            <span>{status?.model || 'AI 居民'}</span>
+            <span>AI 居民</span>
           </span>
           <ToolButton label="世界设置" icon="settings" onClick={() => setModal('settings')} />
         </div>
@@ -673,7 +673,7 @@ export function App() {
                 <div className="speech-preview" style={{ '--agent': agent.color } as CSSProperties}>
                   <span className="speech-name">
                     {agent.name}
-                    <small>MODEL</small>
+                    <small>AI</small>
                   </span>
                   <p>“{agent.speech}”</p>
                 </div>
