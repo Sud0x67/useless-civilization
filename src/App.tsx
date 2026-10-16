@@ -10,6 +10,7 @@ import {
 import { Town, type CameraControls } from './components/Town';
 import { Icon } from './components/Icons';
 import { Conversation } from './components/Conversation';
+import { ActivityFeed } from './components/ActivityFeed';
 import { RequestScheduler, type ScheduledTask } from './world/request-scheduler';
 import { DecisionSchema, RoundSchema, type Agent, type World } from './shared/schema';
 import {
@@ -154,8 +155,6 @@ export function App() {
   const [night, setNight] = useState(true);
   const [notice, setNotice] = useState('');
   const [sound, setSound] = useState(false);
-  const [following, setFollowing] = useState(true);
-  const feedList = useRef<HTMLDivElement>(null);
   const idleSince = useRef(Date.now());
   const camera = useRef<CameraControls>(null);
   const file = useRef<HTMLInputElement>(null);
@@ -354,10 +353,6 @@ export function App() {
     const timeout = setTimeout(() => setNotice(''), 5000);
     return () => clearTimeout(timeout);
   }, [notice]);
-
-  useEffect(() => {
-    if (following && feedList.current) feedList.current.scrollTop = 0;
-  }, [following, world, replay, panel]);
 
   const view = replay === null ? world : snapshots[replay] || world;
   const agent = view.agents.find((a) => a.id === selected) || null;
@@ -832,65 +827,12 @@ export function App() {
             </button>
           </div>
           {panel === 'feed' ? (
-            <>
-              <div className="feed-intro">
-                <span className="tiny-dot" />
-                {busy ? '模型正在为六位居民做决定' : '小镇里发生的那些小事'}
-                <span>最新在上</span>
-              </div>
-              <div className="feed-list" ref={feedList}>
-                {view.feed.map((item) => {
-                  const actor = view.agents.find((a) => a.id === item.actor);
-                  return (
-                    <article
-                      key={item.id}
-                      className={`feed-item ${item.type === 'event' ? 'event-feed' : ''}`}
-                    >
-                      <div className="feed-icon">
-                        {actor && item.source === 'model' ? (
-                          <Avatar agent={actor} small />
-                        ) : (
-                          <Icon name={item.source === 'human' ? 'spark' : 'cube'} size={17} />
-                        )}
-                      </div>
-                      <div className="feed-body">
-                        <div className="feed-meta">
-                          <strong>
-                            {item.source === 'human'
-                              ? item.type === 'chat'
-                                ? `你 → ${actor?.name}`
-                                : '人类观察员'
-                              : actor?.name || '世界旁白'}
-                          </strong>
-                          {item.source === 'model' && <span className="model-tag">AI</span>}
-                          <time>{formatTime(item.minute)}</time>
-                        </div>
-                        <p>{item.text}</p>
-                        {item.source === 'model' && actor && (
-                          <small className="feed-place">
-                            <Icon name="map" size={10} />
-                            {places[actor.location].name}
-                          </small>
-                        )}
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-              <button
-                className="follow-toggle"
-                onClick={() => setFollowing(!following)}
-                aria-pressed={following}
-              >
-                <Icon name={following ? 'check' : 'target'} size={13} />
-                {following ? '正在跟随最新动态' : '跟随最新动态'}
-              </button>
-              {following && (
-                <span className="sr-only" role="status">
-                  {view.feed[0]?.text}
-                </span>
-              )}
-            </>
+            <ActivityFeed
+              key={replay === null ? 'live' : `replay-${replay}`}
+              world={view}
+              busy={busy}
+              avatar={(actor) => <Avatar agent={actor} small />}
+            />
           ) : agent ? (
             <div
               className={`profile-panel ${residentTab === 'chat' ? 'conversation-open' : 'details-open'}`}

@@ -975,6 +975,7 @@ p {
   padding: 0 15px;
   scrollbar-width: thin;
   scrollbar-color: #314337 transparent;
+  overflow-anchor: none;
 }
 .feed-item {
   display: flex;
@@ -1776,10 +1777,7 @@ p {
     display: flex;
   }
   .feed-list {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    column-gap: 25px;
-    align-content: start;
+    display: block;
   }
   .feed-item {
     padding: 15px 0;
@@ -2511,4 +2509,12 @@ p {
   .profile-panel.conversation-open {
     padding: 16px;
   }
+}
+
+.chat-shortcuts {
+  display: block;
+  margin-top: 5px;
+  font-size: 8px;
+  color: #7a9d81;
+  text-align: right;
 }

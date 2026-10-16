@@ -29,6 +29,7 @@ export function Conversation({
   full: boolean;
 }) {
   const history = useRef<HTMLDivElement>(null);
+  const composing = useRef(false);
   const following = useRef(true);
   const previousAgent = useRef(agent.id);
   useEffect(() => {
@@ -102,8 +103,36 @@ export function Conversation({
           <textarea
             id="chat-message"
             maxLength={300}
+            aria-describedby="chat-shortcuts"
             value={draft}
             onChange={(e) => onDraft(e.target.value)}
+            onCompositionStart={() => {
+              composing.current = true;
+            }}
+            onCompositionEnd={() => {
+              composing.current = false;
+            }}
+            onKeyDown={(e) => {
+              if (
+                e.key !== 'Enter' ||
+                e.shiftKey ||
+                e.nativeEvent.isComposing ||
+                composing.current ||
+                e.keyCode === 229
+              )
+                return;
+              e.preventDefault();
+              if (
+                !e.repeat &&
+                !e.ctrlKey &&
+                !e.altKey &&
+                !e.metaKey &&
+                !locked &&
+                !full &&
+                draft.trim()
+              )
+                e.currentTarget.form?.requestSubmit();
+            }}
             disabled={locked}
             placeholder="随时说点什么，不用先暂停"
             rows={2}
@@ -116,6 +145,9 @@ export function Conversation({
           {full ? '等待队列已满，请稍后发送' : '人类操作优先 · 连续消息依次回应'} · {draft.length}
           /300
         </span>
+        <small className="chat-shortcuts" id="chat-shortcuts">
+          Enter 发送 · Shift+Enter 换行
+        </small>
       </form>
     </section>
   );
