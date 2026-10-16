@@ -29,12 +29,12 @@ export const CommandSchema = z.object({ requestId: z.string().uuid(), action: Ac
 const DEFAULTS = {
   cooldown: 10000,
   visitorHour: 20,
-  visitorDay: 60,
+  visitorDay: 600,
   ipHour: 100,
   perVisitorPending: 2,
   queue: 20,
   callsMinute: 6,
-  callsDay: 500,
+  callsDay: 5000,
   interval: 20000,
   maxViewers: 200,
 };

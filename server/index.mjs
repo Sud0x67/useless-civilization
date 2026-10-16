@@ -34,7 +34,8 @@ const town = localPreview
       config,
       limits: {
         callsMinute: Number(process.env.MODEL_CALLS_PER_MINUTE || 6),
-        callsDay: Number(process.env.MODEL_CALLS_PER_DAY || 500),
+        callsDay: Number(process.env.MODEL_CALLS_PER_DAY || 5000),
+        visitorDay: Number(process.env.VISITOR_OPERATIONS_PER_DAY || 600),
         interval: Number(process.env.TOWN_INTERVAL_MS || 20000),
       },
     });

@@ -71,20 +71,21 @@ npm run dev
 
 ### 配置项
 
-| 变量                     | 用途 / 默认值                                                                 |
-| ------------------------ | ----------------------------------------------------------------------------- |
-| `LLM_BASE_URL`           | 模型服务的兼容接口根地址，不包含 `/responses` 或 `/chat/completions`          |
-| `LLM_MODEL`              | 模型名称；`.env.example` 使用 `qwen3.8-flash`，不会自动切换模型               |
-| `LLM_API_KEY`            | 仅服务器使用的模型密钥                                                        |
-| `LLM_WIRE_API`           | `responses`（默认）或 `chat`                                                  |
-| `ADMIN_TOKEN`            | 管理员令牌；未配置时不能调用管理接口                                          |
-| `DATABASE_PATH`          | SQLite 路径，默认 `data/town.sqlite`                                          |
-| `HOST` / `PORT`          | 默认 `127.0.0.1:4180`                                                         |
-| `PUBLIC_ORIGIN`          | 公开站点来源，例如 `https://your-domain.example`，用于同源检查及 HTTPS Cookie |
-| `TRUST_PROXY`            | 默认关闭；仅在可信本机反向代理后设置为 `1`                                    |
-| `TOWN_INTERVAL_MS`       | 自动决策间隔，默认 `20000` 毫秒                                               |
-| `MODEL_CALLS_PER_MINUTE` | 全站滚动一分钟模型调用上限，默认 `6`                                          |
-| `MODEL_CALLS_PER_DAY`    | 全站 UTC 自然日模型调用上限，默认 `500`                                       |
+| 变量                         | 用途 / 默认值                                                                 |
+| ---------------------------- | ----------------------------------------------------------------------------- |
+| `LLM_BASE_URL`               | 模型服务的兼容接口根地址，不包含 `/responses` 或 `/chat/completions`          |
+| `LLM_MODEL`                  | 模型名称；`.env.example` 使用 `qwen3.8-flash`，不会自动切换模型               |
+| `LLM_API_KEY`                | 仅服务器使用的模型密钥                                                        |
+| `LLM_WIRE_API`               | `responses`（默认）或 `chat`                                                  |
+| `ADMIN_TOKEN`                | 管理员令牌；未配置时不能调用管理接口                                          |
+| `DATABASE_PATH`              | SQLite 路径，默认 `data/town.sqlite`                                          |
+| `HOST` / `PORT`              | 默认 `127.0.0.1:4180`                                                         |
+| `PUBLIC_ORIGIN`              | 公开站点来源，例如 `https://your-domain.example`，用于同源检查及 HTTPS Cookie |
+| `TRUST_PROXY`                | 默认关闭；仅在可信本机反向代理后设置为 `1`                                    |
+| `TOWN_INTERVAL_MS`           | 自动决策间隔，默认 `20000` 毫秒                                               |
+| `MODEL_CALLS_PER_MINUTE`     | 全站滚动一分钟模型调用上限，默认 `6`                                          |
+| `MODEL_CALLS_PER_DAY`        | 全站 UTC 自然日模型调用上限，默认 `5000`                                      |
+| `VISITOR_OPERATIONS_PER_DAY` | 每位访客 UTC 自然日参与上限，默认 `600`                                       |
 
 默认使用 Responses API、Bearer 认证、`reasoning.effort=none` 和 `store=false`；`chat` 模式使用 `enable_thinking=false`。不同兼容服务对扩展参数的支持可能不同，适配入口见 [server/model.mjs](server/model.mjs)。
 
@@ -120,13 +121,13 @@ flowchart LR
 
 匿名身份使用带签名的 Cookie，设置 HttpOnly、SameSite=Lax，HTTPS 下还会设置 Secure。清 Cookie 可以换身份，因此同时检查 IP 和全站额度。
 
-| 层级     | 默认限制                                                             |
-| -------- | -------------------------------------------------------------------- |
-| 每位访客 | 每 10 秒一次操作；每小时 20 次、每 UTC 自然日 60 次；最多 2 项未完成 |
-| 每个 IP  | 滚动一小时 100 次操作                                                |
-| 全站队列 | 最多 20 项未完成操作                                                 |
-| 全站模型 | 滚动一分钟 6 次、每 UTC 自然日 500 次，自动推进与人工互动共用        |
-| 在线连接 | 最多 200 个窗口，同一 IP 最多 8 个窗口                               |
+| 层级     | 默认限制                                                              |
+| -------- | --------------------------------------------------------------------- |
+| 每位访客 | 每 10 秒一次操作；每小时 20 次、每 UTC 自然日 600 次；最多 2 项未完成 |
+| 每个 IP  | 滚动一小时 100 次操作                                                 |
+| 全站队列 | 最多 20 项未完成操作                                                  |
+| 全站模型 | 滚动一分钟 6 次、每 UTC 自然日 5000 次，自动推进与人工互动共用        |
+| 在线连接 | 最多 200 个窗口，同一 IP 最多 8 个窗口                                |
 
 额度保存在 SQLite，重启不会重置。请求编号用于幂等处理，避免网络回执丢失造成重复排队。模型额度在调用前扣除，失败、超时和已发出的中止请求都计入；失败任务的显式重试也会再次消耗额度。
 

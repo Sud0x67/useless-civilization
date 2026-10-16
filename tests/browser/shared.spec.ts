@@ -38,11 +38,17 @@ async function open(browser: Browser) {
   const page = await context.newPage();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto(base);
-  await expect(page.getByLabel('共享小镇状态')).toContainText('已连接');
+  await expect(page.getByLabel('共享小镇状态')).toContainText('共享小镇 · 实时连接');
+  await expect(page.getByLabel('共享小镇状态')).toContainText('今日参与 0/600');
+  await expect(page.getByLabel('共享小镇状态')).toContainText('全站今日模型 0/5000 次');
   await page.getByRole('button', { name: '选择居民米拉', exact: true }).click();
   return page;
 }
-const reply = (text: string) => ({ decision: { ...decision, speech: text }, round });
+const reply = (text: string) => ({
+  decision: { ...decision, speech: text },
+  round,
+  usage: { input: 10, output: 20 },
+});
 
 test('anonymous visitors share FIFO conversations and reconnect to the same saved town', async ({
   browser,
@@ -65,7 +71,7 @@ test('anonymous visitors share FIFO conversations and reconnect to the same save
     await expect(page.getByText('再回应 Bob', { exact: true })).toBeVisible();
   }
   await alice.reload();
-  await expect(alice.getByLabel('共享小镇状态')).toContainText('已连接');
+  await expect(alice.getByLabel('共享小镇状态')).toContainText('共享小镇 · 实时连接');
   await alice.getByRole('button', { name: '选择居民米拉', exact: true }).click();
   await expect(alice.getByText('再回应 Bob', { exact: true })).toBeVisible();
   expect(
@@ -77,8 +83,11 @@ test('anonymous visitors share FIFO conversations and reconnect to the same save
   ).toEqual({ local: 0, session: 0, cookies: '' });
   await alice.screenshot({ path: test.info().outputPath('shared-town.png'), fullPage: true });
   await expect(alice.locator('.toast')).toHaveCount(0);
+  await expect(alice.getByLabel('共享小镇状态')).toContainText('今日参与 1/600');
+  await expect(alice.getByLabel('共享小镇状态')).toContainText('全站今日模型 2/5000 次');
+  await expect(alice.getByLabel('模型累计用量')).toHaveText('2 次调用60 tokens');
   await expect(alice.locator('body')).not.toContainText(
-    /Cookie|SQLite|不用先暂停|人类操作优先|累计用量|tokens|shared-test/,
+    /Cookie|SQLite|不用先暂停|人类操作优先|累计用量|shared-test/,
   );
   const cookies = await contexts[0].cookies();
   expect(cookies[0].httpOnly).toBe(true);
@@ -162,7 +171,7 @@ test('quota errors preserve drafts and delayed acknowledgements do not erase new
   await page.getByRole('textbox').fill('成功回执前写好的下一条');
   accepted.resolve();
   await page.getByRole('button', { name: '世界设置', exact: true }).click();
-  await expect(page.getByRole('dialog')).toContainText('今日互动 1/60');
+  await expect(page.getByRole('dialog')).toContainText('今日互动 1/600');
   await expect(page.getByRole('dialog')).not.toContainText(/Cookie|SQLite|LLM_|API|服务器/);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('textbox')).toHaveValue('成功回执前写好的下一条');

@@ -26,5 +26,5 @@ export type SharedState = {
   quota: { usedHour: number; hourLimit: number; usedDay: number; dayLimit: number; nextAt: number };
   budget: { minuteUsed: number; dayUsed: number; dayLimit: number; resetsAt: number };
   usage: { calls: number; input: number; output: number };
-  limits: { perVisitorPending: number; queue: number; interval: number };
+  limits: { perVisitorPending: number; queue: number; interval: number; cooldown: number };
 };

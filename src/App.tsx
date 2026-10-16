@@ -133,6 +133,7 @@ export function App() {
   const [visible, setVisible] = useState(!document.hidden);
   const [speed, setSpeed] = useState<keyof typeof intervals>('20s');
   const [connectionError, setConnectionError] = useState('');
+  const [usage, setUsage] = useState({ calls: 0, input: 0, output: 0 });
   const [drafts, setDrafts] = useState<Partial<Record<AgentId, string>>>({});
   const executeRef = useRef<
     (task: ScheduledTask<ModelAction>, signal: AbortSignal) => Promise<void>
@@ -308,6 +309,11 @@ export function App() {
               return applyRound(current, parsed.data);
             })();
       commit(next);
+      setUsage((old) => ({
+        calls: old.calls + 1,
+        input: old.input + Math.max(0, Number(result.usage?.input) || 0),
+        output: old.output + Math.max(0, Number(result.usage?.output) || 0),
+      }));
       if (action.type === 'chat' && sound && 'speechSynthesis' in window) {
         try {
           const speech = new SpeechSynthesisUtterance(
@@ -816,23 +822,31 @@ export function App() {
             </div>
           </div>
           {sharedMode && (
-            <div
-              className={
-                !shared.connected || !!sharedData?.budget.resetsAt ? 'shared-status' : 'sr-only'
-              }
-              role="status"
-              aria-label="共享小镇状态"
-            >
-              {!shared.connected
-                ? '正在重连…'
-                : sharedData?.budget.resetsAt
-                  ? `互动暂时休息，${new Date(sharedData.budget.resetsAt).toLocaleString([], {
-                      month: 'numeric',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })} 恢复。`
-                  : '已连接'}
+            <div className="shared-status" role="status" aria-label="共享小镇状态">
+              <strong>共享小镇 · {shared.connected ? '实时连接' : '正在重连…'}</strong>
+              {sharedData && (
+                <>
+                  <span>
+                    今日参与 {sharedData.quota.usedDay}/{sharedData.quota.dayLimit} · 间隔{' '}
+                    {sharedData.limits.cooldown / 1000} 秒
+                  </span>
+                  <span>
+                    全站今日模型 {sharedData.budget.dayUsed}/{sharedData.budget.dayLimit} 次
+                  </span>
+                </>
+              )}
+              {!!sharedData?.budget.resetsAt && (
+                <span>
+                  互动暂时休息，
+                  {new Date(sharedData.budget.resetsAt).toLocaleString([], {
+                    month: 'numeric',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}{' '}
+                  恢复。
+                </span>
+              )}
             </div>
           )}
           {humanPending && (
@@ -1173,7 +1187,15 @@ export function App() {
         <span>
           useless-llm.com<span className="bottom-slash">/</span>一个关于 AI 和人类的无用实验
         </span>
-        <span>六位居民，一座小镇。</span>
+        <span aria-label="模型累计用量">
+          {sharedMode ? (sharedData?.usage.calls ?? 0) : usage.calls} 次调用
+          <span className="tiny-dot" />
+          {(sharedMode
+            ? (sharedData?.usage.input ?? 0) + (sharedData?.usage.output ?? 0)
+            : usage.input + usage.output
+          ).toLocaleString()}{' '}
+          tokens
+        </span>
       </footer>
       {notice && (
         <div className="toast" role="status">
