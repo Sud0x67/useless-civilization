@@ -20,6 +20,7 @@ RestartSec=5
 TimeoutStopSec=15
 UMask=0077
 StateDirectory=useless-civilization
+StateDirectoryMode=0700
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Useless Civilization backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+RandomizedDelaySec=15m
+Persistent=true
+Unit=useless-civilization-backup.service
+
+[Install]
+WantedBy=timers.target

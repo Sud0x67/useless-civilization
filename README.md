@@ -2,7 +2,7 @@
 
 一座漂浮在夜空中的共享小镇，六位性格不同的 AI 居民。居民的行动、对白和公开行动说明来自真实模型，没有脚本对白或失败时的预设回复。
 
-所有访客匿名围观和参与同一座小镇：聊天、事件和居民回应公开；服务器串行执行操作并通过 SSE 实时同步。**一台支持 Node.js 24 的阿里云轻量服务器即可运行，SQLite 随应用保存数据，不需要云数据库。** 当前代码在 `~/code/useless-civilization`，尚未部署到公网或绑定 `useless-llm.com`。
+所有访客匿名围观和参与同一座小镇：聊天、事件和居民回应公开；服务器串行执行操作并通过 SSE 实时同步。**一台支持 Node.js 24 的阿里云轻量服务器即可运行，SQLite 随应用保存数据，不需要云数据库。** 当前代码在 `~/code/useless-civilization`，已部署到轻量服务器；公网域名仍等待备案/接入和 DNS 配置，详见 [部署记录](deploy/production.md)。
 
 ## 本地运行
 
@@ -138,7 +138,7 @@ sudo /usr/bin/env node --env-file=/etc/useless-civilization.env server/admin.mjs
 sudo env DATABASE_PATH=/var/lib/useless-civilization/town.sqlite /usr/bin/env node --env-file=/etc/useless-civilization.env server/backup.mjs /var/backups/useless-civilization/town-2026-10-16.sqlite
 ```
 
-备份脚本使用 SQLite backup API，允许在线一致性备份；不要只复制运行中的 `.sqlite` 主文件而遗漏 WAL。请自行设置每日备份和异机副本；同服务器备份不能抵御磁盘丢失。备份含公开对话与匿名额度数据，按私有文件保存。
+备份脚本使用 SQLite backup API，允许在线一致性备份；不要只复制运行中的 `.sqlite` 主文件而遗漏 WAL。`deploy/useless-civilization-backup.service` 和 `.timer` 提供每日自动备份，保留最近 7 个日期的备份；先创建服务用户可写的 `/var/backups/useless-civilization`（700 权限），安装 unit 并启用 timer。当前服务器已启用。请另行保存异机副本，同服务器备份不能抵御磁盘丢失。备份含公开对话与匿名额度数据，按私有文件保存。
 
 恢复时先停止服务，将备份替换为数据目录中的 `town.sqlite`，同时移走旧的 `town.sqlite-wal` 和 `town.sqlite-shm`，恢复 `civilization` 所有权及 600 权限，再启动服务。恢复旧备份也会回退额度记录，请在维护期间暂停参与并核对用量。
 
