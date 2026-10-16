@@ -3,15 +3,18 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type ReactNode,
 } from 'react';
 import { Town, type CameraControls } from './components/Town';
 import { Icon } from './components/Icons';
+import { Conversation } from './components/Conversation';
+import { RequestScheduler, type ScheduledTask } from './world/request-scheduler';
 import { DecisionSchema, RoundSchema, type Agent, type World } from './shared/schema';
 import {
   addHumanMessage,
-  applyDecision,
+  applyChatReply,
   applyEvent,
   applyRound,
   createWorld,
@@ -28,6 +31,11 @@ import {
 
 type Status = { configured: boolean; model: string | null; wireApi: string };
 type Modal = 'events' | 'settings' | 'reset' | null;
+type ModelAction =
+  | { type: 'round' }
+  | { type: 'event'; eventId: EventId; prepared?: boolean }
+  | { type: 'chat'; agentId: AgentId; text: string; messageId?: number }
+  | { type: 'join' };
 const intervals = { '20s': 20000, '12s': 12000, '8s': 8000 };
 function Avatar({ agent, small = false }: { agent: Agent; small?: boolean }) {
   return (
@@ -118,19 +126,29 @@ export function App() {
   const replayRef = useRef<number | null>(null);
   const [selected, setSelected] = useState<AgentId | null>(null);
   const [panel, setPanel] = useState<'feed' | 'resident'>('feed');
+  const [residentTab, setResidentTab] = useState<'chat' | 'details'>('chat');
   const [status, setStatus] = useState<Status | null>(null);
   const [paused, setPaused] = useState(
     () => new URLSearchParams(location.search).get('paused') === '1',
   );
-  const pausedRef = useRef(paused);
   const [visible, setVisible] = useState(!document.hidden);
   const [speed, setSpeed] = useState<keyof typeof intervals>('20s');
-  const [busy, setBusy] = useState(false);
-  const busyRef = useRef(false);
-  const [error, setError] = useState('');
-  const [failed, setFailed] = useState<'round' | 'chat'>('round');
-  const [message, setMessage] = useState('');
-  const lastChat = useRef<{ id: AgentId; message: string } | null>(null);
+  const [connectionError, setConnectionError] = useState('');
+  const [drafts, setDrafts] = useState<Partial<Record<AgentId, string>>>({});
+  const executeRef = useRef<
+    (task: ScheduledTask<ModelAction>, signal: AbortSignal) => Promise<void>
+  >(async () => {});
+  const [scheduler] = useState(
+    () => new RequestScheduler<ModelAction>((task, signal) => executeRef.current(task, signal)),
+  );
+  const schedule = useSyncExternalStore(scheduler.subscribe, scheduler.getSnapshot);
+  const busy = schedule.active !== null;
+  const error = connectionError || schedule.error;
+  const humanTasks = [schedule.active, schedule.failed, ...schedule.waiting].filter(
+    (task): task is ScheduledTask<ModelAction> => task?.kind === 'human',
+  );
+  const humanPending = humanTasks.length > 0;
+  const queueFull = humanTasks.length >= scheduler.limit;
   const [usage, setUsage] = useState({ calls: 0, input: 0, output: 0 });
   const [modal, setModal] = useState<Modal>(null);
   const [night, setNight] = useState(true);
@@ -138,8 +156,6 @@ export function App() {
   const [sound, setSound] = useState(false);
   const [following, setFollowing] = useState(true);
   const feedList = useRef<HTMLDivElement>(null);
-  const controller = useRef<AbortController | null>(null);
-  const generation = useRef(0);
   const idleSince = useRef(Date.now());
   const camera = useRef<CameraControls>(null);
   const file = useRef<HTMLInputElement>(null);
@@ -153,93 +169,112 @@ export function App() {
     setSnapshots(history);
   }, []);
   const pause = useCallback((value: boolean) => {
-    pausedRef.current = value;
     setPaused(value);
     idleSince.current = Date.now();
   }, []);
-  const cancel = useCallback(() => {
-    generation.current++;
-    controller.current?.abort();
-    controller.current = null;
-    busyRef.current = false;
-    setBusy(false);
-  }, []);
+  const cancel = useCallback(() => scheduler.clear(), [scheduler]);
   const select = useCallback((id: AgentId) => {
     setSelected(id);
     setPanel('resident');
+    setResidentTab('chat');
     idleSince.current = Date.now();
   }, []);
 
-  const run = useCallback(
-    async (chat?: { id: AgentId; message: string }, retry = false) => {
-      if (busyRef.current || replayRef.current !== null || !status?.configured || document.hidden)
+  executeRef.current = async (task, signal) => {
+    if (signal.aborted) return;
+    firstRound.current = true;
+    const action = task.action;
+    let current = worldRef.current;
+    try {
+      if (action.type === 'event' && !action.prepared) {
+        current = applyEvent(current, action.eventId);
+        action.prepared = true;
+        commit(current);
+      }
+      if (action.type === 'join') {
+        if (!current.human) commit(joinWorld(current));
         return;
-      const token = ++generation.current;
-      const abort = new AbortController();
-      controller.current = abort;
-      busyRef.current = true;
-      setBusy(true);
-      setError('');
-      setFailed(chat ? 'chat' : 'round');
-      let current = worldRef.current;
-      if (chat) {
-        lastChat.current = chat;
-        if (!retry) {
-          current = addHumanMessage(current, chat.id, chat.message);
-          commit(current);
+      }
+      if (action.type === 'chat' && action.messageId === undefined) {
+        current = addHumanMessage(current, action.agentId, action.text);
+        action.messageId = current.conversations.at(-1)!.id;
+        commit(current);
+      }
+      const response = await fetch(action.type === 'chat' ? '/api/decide' : '/api/turn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal,
+        body: JSON.stringify({
+          world: current,
+          ...(action.type === 'chat' ? { agentId: action.agentId, prompt: action.text } : {}),
+        }),
+      });
+      const result = await response.json();
+      // A preempted request must never commit, even if the provider ignores cancellation.
+      if (signal.aborted) return;
+      if (!response.ok) throw new Error(result.error || '请求失败，请重试。');
+      const next =
+        action.type === 'chat'
+          ? (() => {
+              const parsed = DecisionSchema.safeParse(result.decision);
+              if (!parsed.success) throw new Error('模型没有返回完整、有效的决策，请重试。');
+              return applyChatReply(current, action.agentId, parsed.data, action.messageId!);
+            })()
+          : (() => {
+              const parsed = RoundSchema.safeParse(result.round);
+              if (!parsed.success) throw new Error('模型没有返回完整、有效的决策，请重试。');
+              return applyRound(current, parsed.data);
+            })();
+      commit(next);
+      setUsage((old) => ({
+        calls: old.calls + 1,
+        input: old.input + Math.max(0, Number(result.usage?.input) || 0),
+        output: old.output + Math.max(0, Number(result.usage?.output) || 0),
+      }));
+      if (action.type === 'chat' && sound && 'speechSynthesis' in window) {
+        try {
+          const speech = new SpeechSynthesisUtterance(
+            next.agents.find((a) => a.id === action.agentId)!.speech,
+          );
+          speech.lang = 'zh-CN';
+          window.speechSynthesis.speak(speech);
+        } catch {
+          setNotice('回复已保存，当前浏览器暂时无法朗读。');
         }
       }
-      try {
-        const response = await fetch(chat ? '/api/decide' : '/api/turn', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: abort.signal,
-          body: JSON.stringify({
-            world: current,
-            ...(chat ? { agentId: chat.id, prompt: chat.message } : {}),
-          }),
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || '请求失败，请重试。');
-        if (token !== generation.current) return;
-        const validated = chat
-          ? DecisionSchema.safeParse(result.decision)
-          : RoundSchema.safeParse(result.round);
-        if (!validated.success) throw new Error('模型没有返回完整、有效的决策，请重试。');
-        const next = chat
-          ? applyDecision(current, chat.id, DecisionSchema.parse(validated.data))
-          : applyRound(current, RoundSchema.parse(validated.data));
-        commit(next);
-        setUsage((old) => ({
-          calls: old.calls + 1,
-          input: old.input + Math.max(0, Number(result.usage?.input) || 0),
-          output: old.output + Math.max(0, Number(result.usage?.output) || 0),
-        }));
-        if (chat) {
-          setMessage('');
-          if (sound && 'speechSynthesis' in window) {
-            const speech = new SpeechSynthesisUtterance(
-              next.agents.find((a) => a.id === chat.id)!.speech,
-            );
-            speech.lang = 'zh-CN';
-            window.speechSynthesis.speak(speech);
-          }
-        }
-      } catch (e) {
-        if (token === generation.current && !abort.signal.aborted) {
-          setError(e instanceof Error ? e.message : '请求失败，请重试。');
-          pause(true);
-        }
-      } finally {
-        if (token === generation.current) {
-          busyRef.current = false;
-          setBusy(false);
-          controller.current = null;
-        }
-      }
-    },
-    [status, commit, pause, sound],
-  );
+    } catch (error) {
+      if (!signal.aborted) pause(true);
+      throw error;
+    }
+  };
+  const run = useCallback(() => {
+    if (replayRef.current !== null || !status?.configured || document.hidden) return false;
+    return scheduler.automatic({ type: 'round' });
+  }, [scheduler, status]);
+  function describe(task: ScheduledTask<ModelAction>) {
+    const action = task.action;
+    if (action.type === 'event')
+      return `投放「${events.find((e) => e.id === action.eventId)!.title}」`;
+    if (action.type === 'chat')
+      return `对${worldRef.current.agents.find((a) => a.id === action.agentId)!.name}说：${action.text}`;
+    return action.type === 'join' ? '作为人类加入小镇' : '小镇自动决策';
+  }
+  function submit(action: ModelAction) {
+    if (replayRef.current !== null || !status?.configured) return false;
+    const task = scheduler.enqueue(action);
+    if (!task) {
+      setNotice('等待队列已满，请稍后再提交。草稿已保留。');
+      return false;
+    }
+    firstRound.current = true;
+    idleSince.current = Date.now();
+    setNotice(
+      scheduler.getSnapshot().active?.id === task.id
+        ? '已优先处理，无需暂停小镇。'
+        : '已加入等待队列，将依次处理。',
+    );
+    return true;
+  }
 
   useEffect(() => {
     const abort = new AbortController();
@@ -251,21 +286,20 @@ export function App() {
       .then((data: Status) => {
         setStatus(data);
         if (!data.configured) {
-          setError('尚未配置模型。请填写服务器 .env 后重启。');
+          setConnectionError('尚未配置模型。请填写服务器 .env 后重启。');
           pause(true);
         }
       })
       .catch(() => {
         if (!abort.signal.aborted) {
-          setError('无法连接本地服务器，请检查服务是否运行。');
+          setConnectionError('无法连接本地服务器，请检查服务是否运行。');
           pause(true);
         }
       });
     const visibility = () => {
       setVisible(!document.hidden);
-      if (document.hidden) {
-        cancel();
-      }
+      if (document.hidden) scheduler.suspend();
+      else if (replayRef.current === null) scheduler.resume();
       idleSince.current = Date.now();
     };
     const active = () => {
@@ -282,15 +316,29 @@ export function App() {
       document.removeEventListener('keydown', active);
       window.speechSynthesis?.cancel();
     };
-  }, [cancel, pause]);
+  }, [cancel, pause, scheduler]);
   useEffect(() => {
-    if (status?.configured && !firstRound.current && visible && replay === null && !paused) {
-      firstRound.current = true;
-      void run();
+    if (
+      status?.configured &&
+      !firstRound.current &&
+      visible &&
+      replay === null &&
+      !paused &&
+      !humanPending
+    ) {
+      if (run()) firstRound.current = true;
     }
-  }, [status, visible, replay, paused, run]);
+  }, [status, visible, replay, paused, run, humanPending]);
   useEffect(() => {
-    if (!status?.configured || paused || !visible || replay !== null || modal) return;
+    if (
+      !status?.configured ||
+      paused ||
+      !visible ||
+      replay !== null ||
+      humanPending ||
+      (modal && modal !== 'events')
+    )
+      return;
     const interval = setInterval(() => {
       if (Date.now() - idleSince.current > 600000) {
         pause(true);
@@ -300,7 +348,7 @@ export function App() {
       void run();
     }, intervals[speed]);
     return () => clearInterval(interval);
-  }, [status, paused, visible, replay, modal, speed, run, pause]);
+  }, [status, paused, visible, replay, modal, speed, run, pause, humanPending]);
   useEffect(() => {
     if (!notice) return;
     const timeout = setTimeout(() => setNotice(''), 5000);
@@ -313,9 +361,12 @@ export function App() {
 
   const view = replay === null ? world : snapshots[replay] || world;
   const agent = view.agents.find((a) => a.id === selected) || null;
-  const disabled = busy || replay !== null || !status?.configured;
+  const interactionLocked = replay !== null || !status?.configured;
+  const disabled = busy || humanPending || interactionLocked;
+  const message = selected ? drafts[selected] || '' : '';
+  const joinPending = humanTasks.some((t) => t.action.type === 'join');
   function enterReplay(index: number) {
-    cancel();
+    scheduler.suspend();
     pause(true);
     replayRef.current = index;
     setReplay(index);
@@ -323,13 +374,11 @@ export function App() {
   function leaveReplay() {
     replayRef.current = null;
     setReplay(null);
+    if (!document.hidden) scheduler.resume();
     setNotice('已返回当前世界，点击播放继续。');
   }
   function event(id: EventId) {
-    if (disabled) return;
-    commit(applyEvent(worldRef.current, id));
-    setModal(null);
-    setNotice('事件已投放，下一轮由模型决定居民的反应。');
+    if (submit({ type: 'event', eventId: id })) setModal(null);
   }
   function download() {
     const blob = new Blob([exportReplay(snapshotsRef.current)], { type: 'application/json' });
@@ -347,6 +396,9 @@ export function App() {
       if (input.size > 5000000) throw new Error('回放文件不能超过 5 MB。');
       const history = importReplay(await input.text());
       cancel();
+      scheduler.suspend();
+      setDrafts({});
+      firstRound.current = true;
       pause(true);
       snapshotsRef.current = history;
       setSnapshots(history);
@@ -356,7 +408,7 @@ export function App() {
       replayRef.current = 0;
       setReplay(0);
       setModal(null);
-      setError('');
+      setConnectionError('');
       setNotice('回放已导入，自动运行已暂停。返回当前世界后可以继续。');
     } catch (e) {
       setNotice(e instanceof Error ? e.message : '无法导入回放。');
@@ -366,6 +418,9 @@ export function App() {
   }
   function reset() {
     cancel();
+    if (!document.hidden) scheduler.resume();
+    setDrafts({});
+    firstRound.current = false;
     pause(true);
     const next = createWorld();
     worldRef.current = next;
@@ -374,7 +429,7 @@ export function App() {
     setSnapshots([next]);
     replayRef.current = null;
     setReplay(null);
-    setError('');
+    setConnectionError('');
     setModal(null);
     setNotice('世界已重置。点击播放，等待模型为居民做出第一轮决定。');
   }
@@ -382,7 +437,9 @@ export function App() {
     replay !== null
       ? '正在回放'
       : busy
-        ? '居民思考中'
+        ? schedule.active?.kind === 'human'
+          ? '正在回应你的操作'
+          : '居民思考中'
         : !visible
           ? '页面已休眠'
           : paused
@@ -624,18 +681,17 @@ export function App() {
             <div className="deck-actions">
               <button
                 className="secondary-button join-button"
-                disabled={disabled || view.human}
+                disabled={interactionLocked || queueFull || view.human || joinPending}
                 onClick={() => {
-                  commit(joinWorld(worldRef.current));
-                  setNotice('你已出现在星落广场。选择一位居民，和 TA 说句话。');
+                  submit({ type: 'join' });
                 }}
               >
                 <Icon name={view.human ? 'check' : 'people'} size={16} />
-                {view.human ? '已加入小镇' : '作为人类加入'}
+                {view.human ? '已加入小镇' : joinPending ? '等待加入…' : '作为人类加入'}
               </button>
               <button
                 className="primary-button"
-                disabled={disabled}
+                disabled={interactionLocked}
                 onClick={() => setModal('events')}
               >
                 <Icon name="spark" size={16} />
@@ -643,6 +699,53 @@ export function App() {
               </button>
             </div>
           </div>
+          {humanPending && (
+            <section className="interaction-queue" aria-label="人类操作队列">
+              <div className="queue-heading" role="status">
+                <Icon name="people" size={15} />
+                <strong>
+                  {schedule.suspended
+                    ? '等待返回当前世界后继续'
+                    : schedule.failed
+                      ? '回应失败，等待重试'
+                      : schedule.active?.kind === 'human'
+                        ? '正在处理你的操作'
+                        : '等待处理'}
+                </strong>
+                <small>{schedule.waiting.length} 项等待</small>
+              </div>
+              {humanTasks.map((task) => (
+                <div className="queue-item" key={task.id}>
+                  <span>{describe(task)}</span>
+                  <small>
+                    {schedule.failed?.id === task.id
+                      ? '需重试'
+                      : schedule.active?.id === task.id
+                        ? '处理中'
+                        : '等待中'}
+                  </small>
+                  {schedule.waiting.some((t) => t.id === task.id) && (
+                    <button
+                      aria-label={`取消等待：${describe(task)}`}
+                      title="取消等待"
+                      onClick={() => {
+                        scheduler.remove(task.id);
+                        if (task.action.type === 'chat' && task.action.messageId === undefined) {
+                          const action = task.action;
+                          setDrafts((old) => ({
+                            ...old,
+                            [action.agentId]: old[action.agentId] || action.text,
+                          }));
+                        }
+                      }}
+                    >
+                      <Icon name="close" size={12} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </section>
+          )}
           {error && (
             <div className="error-banner" role="alert">
               <Icon name="info" size={17} />
@@ -656,13 +759,16 @@ export function App() {
                     setModal('settings');
                     return;
                   }
-                  void run(failed === 'chat' ? lastChat.current || undefined : undefined, true);
+                  scheduler.retry();
                 }}
-                disabled={busy}
+                disabled={busy || schedule.suspended}
               >
                 {status?.configured ? '重试' : '查看配置'}
                 <Icon name="refresh" size={13} />
               </button>
+              {schedule.failed?.kind === 'human' && (
+                <button onClick={() => scheduler.skipFailed()}>跳过本次回应</button>
+              )}
             </div>
           )}
           <div className="timeline">
@@ -722,7 +828,7 @@ export function App() {
               onClick={() => setPanel('resident')}
             >
               <Icon name="people" size={15} />
-              居民档案
+              居民互动
             </button>
           </div>
           {panel === 'feed' ? (
@@ -786,7 +892,9 @@ export function App() {
               )}
             </>
           ) : agent ? (
-            <div className="profile-panel">
+            <div
+              className={`profile-panel ${residentTab === 'chat' ? 'conversation-open' : 'details-open'}`}
+            >
               <div className="profile-hero">
                 <Avatar agent={agent} />
                 <div>
@@ -800,94 +908,150 @@ export function App() {
                   </p>
                 </div>
               </div>
-              <p className="personality">{agent.personality}</p>
-              <div className="goal-card">
-                <span>
-                  <Icon name="target" size={13} />
-                  当前人生目标
-                </span>
-                <p>{agent.goal}</p>
-              </div>
-              <div className="needs-grid">
-                {[
-                  { label: '精力', value: agent.energy, color: '#8ccbb7' },
-                  { label: '快乐', value: agent.happiness, color: '#d7b47e' },
-                  { label: '饥饿', value: agent.hunger, color: '#d99a9d' },
-                ].map((n) => (
-                  <div key={n.label}>
-                    <span>
-                      {n.label}
-                      <b>{Math.round(n.value)}</b>
-                    </span>
-                    <i>
-                      <em style={{ width: `${n.value}%`, background: n.color }} />
-                    </i>
-                  </div>
-                ))}
-              </div>
-              <div className="profile-numbers">
-                <span>
-                  金币 <b>{agent.coins}</b>
-                </span>
-                <span>
-                  影响力 <b>{Math.round(agent.influence)}</b>
-                </span>
-              </div>
-              <h3>
-                最近的记忆<small>{agent.memories.length} / 12</small>
-              </h3>
-              <div className="memories">
-                {agent.memories.slice(0, 4).map((m, i) => (
-                  <p key={i}>
-                    <i />
-                    {m}
-                  </p>
-                ))}
-              </div>
-              <h3>居民关系</h3>
-              <div className="relationships">
-                {view.agents
-                  .filter((a) => a.id !== agent.id)
-                  .map((a) => (
-                    <button key={a.id} onClick={() => select(a.id)}>
-                      <span style={{ background: a.color }} />
-                      {a.name}
-                      <b>
-                        {agent.relationships[a.id] > 0 ? '+' : ''}
-                        {agent.relationships[a.id]}
-                      </b>
-                    </button>
-                  ))}
-              </div>
-              <form
-                className="chat-form"
-                onSubmit={(e) => {
+              <div
+                className="resident-tabs"
+                role="tablist"
+                aria-label="居民信息"
+                onKeyDown={(e) => {
+                  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
                   e.preventDefault();
-                  if (message.trim() && !disabled)
-                    void run({ id: agent.id, message: message.trim() });
+                  const next =
+                    e.key === 'Home'
+                      ? 'chat'
+                      : e.key === 'End'
+                        ? 'details'
+                        : residentTab === 'chat'
+                          ? 'details'
+                          : 'chat';
+                  setResidentTab(next);
+                  e.currentTarget
+                    .querySelectorAll<HTMLButtonElement>('[role=tab]')
+                    [next === 'chat' ? 0 : 1].focus();
                 }}
               >
-                <label htmlFor="chat-message">对{agent.name}说句话</label>
-                <div>
-                  <textarea
-                    id="chat-message"
-                    maxLength={300}
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    disabled={disabled}
-                    placeholder="比如：你对镇长有什么看法？"
-                    rows={2}
+                <button
+                  role="tab"
+                  id="conversation-tab"
+                  tabIndex={residentTab === 'chat' ? 0 : -1}
+                  aria-selected={residentTab === 'chat'}
+                  aria-controls="conversation-panel"
+                  onClick={() => setResidentTab('chat')}
+                >
+                  对话
+                </button>
+                <button
+                  role="tab"
+                  id="details-tab"
+                  tabIndex={residentTab === 'details' ? 0 : -1}
+                  aria-selected={residentTab === 'details'}
+                  aria-controls="details-panel"
+                  onClick={() => setResidentTab('details')}
+                >
+                  档案
+                </button>
+              </div>
+              {residentTab === 'chat' ? (
+                <div
+                  className="conversation-pane"
+                  id="conversation-panel"
+                  role="tabpanel"
+                  aria-labelledby="conversation-tab"
+                >
+                  <Conversation
+                    agent={agent}
+                    entries={view.conversations.filter((e) => e.agentId === agent.id)}
+                    pending={
+                      replay !== null
+                        ? []
+                        : humanTasks
+                            .filter(
+                              (t) => t.action.type === 'chat' && t.action.agentId === agent.id,
+                            )
+                            .map((t) => ({
+                              id: t.id,
+                              text: t.action.type === 'chat' ? t.action.text : '',
+                              messageId: t.action.type === 'chat' ? t.action.messageId : undefined,
+                              state:
+                                schedule.failed?.id === t.id
+                                  ? 'failed'
+                                  : schedule.active?.id === t.id
+                                    ? 'active'
+                                    : 'waiting',
+                            }))
+                    }
+                    draft={message}
+                    onDraft={(text) => setDrafts((old) => ({ ...old, [agent.id]: text }))}
+                    onSend={() => {
+                      if (submit({ type: 'chat', agentId: agent.id, text: message.trim() }))
+                        setDrafts((old) => ({ ...old, [agent.id]: '' }));
+                    }}
+                    locked={interactionLocked}
+                    full={queueFull}
                   />
-                  <button
-                    type="submit"
-                    aria-label="发送消息"
-                    disabled={disabled || !message.trim()}
-                  >
-                    <Icon name="arrow" size={18} />
-                  </button>
                 </div>
-                <span>模型回应 · {message.length}/300</span>
-              </form>
+              ) : (
+                <div id="details-panel" role="tabpanel" aria-labelledby="details-tab">
+                  <p className="personality">{agent.personality}</p>
+                  <div className="goal-card">
+                    <span>
+                      <Icon name="target" size={13} />
+                      当前人生目标
+                    </span>
+                    <p>{agent.goal}</p>
+                  </div>
+                  <div className="needs-grid">
+                    {[
+                      { label: '精力', value: agent.energy, color: '#8ccbb7' },
+                      { label: '快乐', value: agent.happiness, color: '#d7b47e' },
+                      { label: '饥饿', value: agent.hunger, color: '#d99a9d' },
+                    ].map((n) => (
+                      <div key={n.label}>
+                        <span>
+                          {n.label}
+                          <b>{Math.round(n.value)}</b>
+                        </span>
+                        <i>
+                          <em style={{ width: `${n.value}%`, background: n.color }} />
+                        </i>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="profile-numbers">
+                    <span>
+                      金币 <b>{agent.coins}</b>
+                    </span>
+                    <span>
+                      影响力 <b>{Math.round(agent.influence)}</b>
+                    </span>
+                  </div>
+                  <h3>
+                    最近的记忆<small>{agent.memories.length} / 12</small>
+                  </h3>
+                  <div className="memories">
+                    {agent.memories.slice(0, 4).map((m, i) => (
+                      <p key={i}>
+                        <i />
+                        {m}
+                      </p>
+                    ))}
+                  </div>
+                  <h3>居民关系</h3>
+                  <div className="relationships">
+                    {view.agents
+                      .filter((a) => a.id !== agent.id)
+                      .map((a) => (
+                        <button key={a.id} onClick={() => select(a.id)}>
+                          <span style={{ background: a.color }} />
+                          {a.name}
+                          <b>
+                            {agent.relationships[a.id] > 0 ? '+' : ''}
+                            {agent.relationships[a.id]}
+                          </b>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="empty-profile">
@@ -939,7 +1103,7 @@ export function App() {
               <button
                 key={e.id}
                 className="event-card"
-                disabled={disabled}
+                disabled={interactionLocked || queueFull}
                 onClick={() => event(e.id)}
                 style={{ '--effect': e.color } as CSSProperties}
               >
@@ -960,7 +1124,9 @@ export function App() {
             ))}
           </div>
           <p className="modal-footnote">
-            事件修改环境与资源；居民的行动和对白均由模型生成。暂停时可点击「运行一轮」观察反应。
+            {queueFull
+              ? '等待队列已满（最多 12 项），请等待完成或取消部分操作。'
+              : '提交后自动请求居民回应，无需暂停。连续投放将按顺序处理。'}
           </p>
         </ModalShell>
       )}
@@ -979,7 +1145,7 @@ export function App() {
             <div>
               <Icon name="spark" />
               <h3>制造一点意外</h3>
-              <p>投放事件改变环境，再让模型决定居民的下一步。你也可以直接和 TA 对话。</p>
+              <p>随时投放事件或发送消息。人类操作优先，连续提交会依次处理，无需先暂停。</p>
             </div>
           </div>
           <div className="settings-model">

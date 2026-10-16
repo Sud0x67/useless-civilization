@@ -58,19 +58,21 @@ test('starts with real-model mode, applies a batch, selects residents and contro
   await page.screenshot({ path: info.outputPath('town.png'), fullPage: true });
 });
 
-test('events change the world and are included in the next model round', async ({ page }) => {
+test('events automatically request reactions while preserving the paused state', async ({
+  page,
+}) => {
   const { rounds } = await mock(page);
   await page.getByRole('button', { name: '投放事件', exact: true }).click();
   await page.getByRole('button', { name: /下一场星星雨/ }).click();
   await expect(page.locator('.effects-row')).toContainText('下一场星星雨');
-  expect(rounds).toHaveLength(1);
-  await page.getByRole('button', { name: '运行一轮', exact: true }).click();
   await expect(page.locator('.clock')).toContainText('08:30');
+  await expect(page.getByRole('button', { name: '开始观察', exact: true })).toBeVisible();
   expect(rounds).toHaveLength(2);
   expect(rounds[1].world.effects[0].id).toBe('rain');
   await page.getByRole('button', { name: '投放事件', exact: true }).click();
   await page.getByRole('button', { name: /免费面包日/ }).click();
-  await expect(page.locator('.world-metrics').first()).toContainText('173');
+  await expect(page.locator('.clock')).toContainText('08:45');
+  await expect(page.locator('.world-metrics').first()).toContainText('185');
 });
 
 test('human joins and receives a model reply with safe text rendering', async ({ page }) => {

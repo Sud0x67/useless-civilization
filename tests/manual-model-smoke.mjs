@@ -17,14 +17,13 @@ try {
       });
   });
   const firstRequest = page.waitForRequest((r) => r.url().endsWith('/api/turn'));
-  const navigation = await page.goto('http://127.0.0.1:4180/');
+  const navigation = await page.goto(process.env.SMOKE_URL || 'http://127.0.0.1:4180/');
   expect(navigation.status()).toBe(200);
   await firstRequest;
   await page.getByRole('button', { name: '暂停观察', exact: true }).click();
   await expect(page.locator('.clock')).toContainText('08:15', { timeout: 40000 });
   await page.getByRole('button', { name: '投放事件', exact: true }).click();
   await page.getByRole('button', { name: /下一场星星雨/ }).click();
-  await page.getByRole('button', { name: '运行一轮', exact: true }).click();
   await expect(page.locator('.clock')).toContainText('08:30', { timeout: 40000 });
   await page.getByRole('button', { name: '选择居民回声' }).click();
   await page.getByLabel('对回声说句话').fill('你喜欢这场星星雨吗？');

@@ -13,7 +13,7 @@ const eventRules = {
   'no-meetings': '禁止开会，不可选择在 hall socialize，该提案会被世界拒绝。',
   rain: '天空正在下一场发光的星星雨。居民可以自行决定观看、躲雨或继续做事。',
 };
-function context(world) {
+function context(world, agentId) {
   return {
     time: world.minute,
     food: world.food,
@@ -44,6 +44,14 @@ function context(world) {
       relationships: a.relationships,
     })),
     recent: world.feed.slice(0, 5).map((e) => ({ actor: e.actor, text: e.text })),
+    ...(agentId
+      ? {
+          conversation: world.conversations
+            .filter((e) => e.agentId === agentId)
+            .slice(-8)
+            .map((e) => ({ role: e.role, text: e.text })),
+        }
+      : {}),
   };
 }
 export async function requestModel(config, { world, agentId, prompt, round = false }, signal) {
@@ -66,7 +74,7 @@ export async function requestModel(config, { world, agentId, prompt, round = fal
     {
       role: 'user',
       content: JSON.stringify({
-        world: context(world),
+        world: context(world, agentId),
         ...(agentId ? { agentId, humanMessage: prompt || null } : {}),
       }),
     },

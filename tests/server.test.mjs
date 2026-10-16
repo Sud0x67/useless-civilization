@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHandler } from '../server/app.mjs';
-import { applyEvent, createWorld } from '../src/world/engine.ts';
+import { addHumanMessage, applyChatReply, applyEvent, createWorld } from '../src/world/engine.ts';
 import { round, decision } from './fixture.ts';
 const owned = [];
 const directories = [];
@@ -94,6 +94,27 @@ describe('model proxy', () => {
     expect(response.status).toBe(200);
     expect((await response.json()).decision.speech).toBe(decision.speech);
   });
+  it('provides the selected resident with bounded conversation context', async () => {
+    const { base, received } = await setup({
+      output: [{ content: [{ type: 'output_text', text: JSON.stringify(decision) }] }],
+    });
+    let world = createWorld();
+    for (let i = 0; i < 6; i++) {
+      world = addHumanMessage(world, 'mira', `问题 ${i}`);
+      world = applyChatReply(world, 'mira', decision, world.conversations.at(-1).id);
+    }
+    world = addHumanMessage(world, 'echo', '另一位居民的对话');
+    const result = await fetch(base + '/api/decide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ world, agentId: 'mira', prompt: '接着聊' }),
+    });
+    expect(result.status).toBe(200);
+    const context = JSON.parse(received().body.input[1].content).world;
+    expect(context.conversation).toHaveLength(8);
+    expect(context.conversation[0]).toEqual({ role: 'human', text: '问题 2' });
+    expect(context.conversation.some((e) => e.text === '另一位居民的对话')).toBe(false);
+  });
   it('only sends rules for currently active events', async () => {
     const { base, received } = await setup();
     await post(base);
@@ -120,7 +141,7 @@ describe('model proxy', () => {
       (await post(base, undefined, { headers: { 'Content-Type': 'text/plain' } })).status,
     ).toBe(415);
     expect((await post(base, undefined, { body: 'not-json' })).status).toBe(400);
-    expect((await post(base, undefined, { body: ' '.repeat(270000) })).status).toBe(413);
+    expect((await post(base, undefined, { body: ' '.repeat(530000) })).status).toBe(413);
     expect(received()).toBeUndefined();
   });
   it('exposes configuration status without credentials and never falls back to dialogue', async () => {

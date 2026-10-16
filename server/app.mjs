@@ -19,7 +19,7 @@ function readJson(req) {
     req.on('data', (chunk) => {
       if (done) return;
       bytes += chunk.length;
-      if (bytes > 262144) {
+      if (bytes > 524288) {
         done = true;
         reject(new HttpError(413, '请求太大，请减少世界数据。'));
         return;

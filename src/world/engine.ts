@@ -186,6 +186,7 @@ export function createWorld(seed = 6712026): World {
     feed: [],
     nextId: 1,
     human: false,
+    conversations: [],
     agents: profiles.map((p, i) => ({
       ...p,
       hunger: 18 + i * 3,
@@ -348,6 +349,32 @@ export function addHumanMessage(input: World, id: AgentId, message: string): Wor
   const text = message.trim().slice(0, 300);
   remember(a, `人类对我说：${text}`);
   addFeed(w, text, id, 'chat', 'human');
+  w.conversations = [
+    ...w.conversations,
+    { id: w.feed[0].id, agentId: id, role: 'human' as const, text, minute: w.minute },
+  ].slice(-120);
+  return w;
+}
+export function applyChatReply(
+  input: World,
+  id: AgentId,
+  proposal: Decision,
+  replyTo: number,
+): World {
+  const w = applyDecision(input, id, proposal);
+  if (w === input) return input;
+  w.feed[0].type = 'chat';
+  w.conversations = [
+    ...w.conversations,
+    {
+      id: w.feed[0].id,
+      agentId: id,
+      role: 'model' as const,
+      text: proposal.speech,
+      minute: w.minute,
+      replyTo,
+    },
+  ].slice(-120);
   return w;
 }
 export function joinWorld(input: World): World {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyDecision,
+  applyChatReply,
   applyEvent,
   applyRound,
   addHumanMessage,
@@ -141,4 +142,32 @@ describe('replays are validated data', () => {
     expect(
       importReplay(exportReplay(Array.from({ length: 125 }, () => createWorld()))),
     ).toHaveLength(120));
+});
+
+describe('resident conversations', () => {
+  it('keeps direct replies paired with their human message after town chatter rolls over', () => {
+    let world = addHumanMessage(createWorld(), 'mira', '你好 🌌');
+    const id = world.conversations[0].id;
+    world = applyChatReply(
+      world,
+      'mira',
+      { action: 'socialize', location: 'square', speech: '欢迎来到星落镇。', reason: '接待人类' },
+      id,
+    );
+    for (let i = 0; i < 30; i++) world = applyRound(world, round);
+    expect(world.feed.some((e) => e.id === id)).toBe(false);
+    expect(world.conversations).toHaveLength(2);
+    expect(world.conversations[1]).toMatchObject({
+      role: 'model',
+      replyTo: id,
+      text: '欢迎来到星落镇。',
+    });
+    expect(importReplay(exportReplay([world]))[0].conversations).toEqual(world.conversations);
+  });
+  it('loads version-one replays that predate conversation history', () => {
+    const { conversations: _old, ...legacy } = createWorld();
+    expect(
+      importReplay(JSON.stringify({ version: 1, snapshots: [legacy] }))[0].conversations,
+    ).toEqual([]);
+  });
 });

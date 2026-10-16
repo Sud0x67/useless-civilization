@@ -67,8 +67,22 @@ export const WorldSchema = z.object({
   feed: z.array(FeedSchema).max(90),
   nextId: z.number().int().nonnegative(),
   human: z.boolean(),
+  conversations: z
+    .array(
+      z.object({
+        id: z.number().int().nonnegative(),
+        agentId: z.enum(IDS),
+        role: z.enum(['human', 'model']),
+        text: z.string().max(500),
+        minute: z.number().int().nonnegative(),
+        replyTo: z.number().int().nonnegative().optional(),
+      }),
+    )
+    .max(120)
+    .default([]),
 });
 export type World = z.infer<typeof WorldSchema>;
+export type ChatEntry = World['conversations'][number];
 export type FeedItem = z.infer<typeof FeedSchema>;
 export const ReplaySchema = z.object({
   version: z.literal(1),
