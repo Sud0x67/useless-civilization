@@ -1,0 +1,30 @@
+[Unit]
+Description=Useless Civilization shared town
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=civilization
+Group=civilization
+WorkingDirectory=/opt/useless-civilization
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=HOST=127.0.0.1
+Environment=PORT=4180
+Environment=DATABASE_PATH=/var/lib/useless-civilization/town.sqlite
+EnvironmentFile=/etc/useless-civilization.env
+ExecStart=/usr/bin/env node /opt/useless-civilization/server/index.mjs --production
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+StateDirectory=useless-civilization
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/useless-civilization
+
+[Install]
+WantedBy=multi-user.target

@@ -11,7 +11,7 @@ function json(res, status, data) {
   });
   res.end(JSON.stringify(data));
 }
-function readJson(req) {
+function readJson(req, limit = 524288) {
   return new Promise((resolveBody, reject) => {
     const chunks = [];
     let bytes = 0;
@@ -19,7 +19,7 @@ function readJson(req) {
     req.on('data', (chunk) => {
       if (done) return;
       bytes += chunk.length;
-      if (bytes > 524288) {
+      if (bytes > limit) {
         done = true;
         reject(new HttpError(413, '请求太大，请减少世界数据。'));
         return;
@@ -45,6 +45,7 @@ function readJson(req) {
 }
 export function createHandler({
   config = {},
+  town,
   production = false,
   middleware,
   staticDir = resolve(root, 'dist'),
@@ -55,6 +56,91 @@ export function createHandler({
   return async (req, res) => {
     try {
       const url = new URL(req.url || '/', 'http://localhost');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Referrer-Policy', 'same-origin');
+      res.setHeader('X-Frame-Options', 'DENY');
+      if (
+        town &&
+        url.pathname.startsWith('/api/') &&
+        (req.headers['sec-fetch-site'] === 'cross-site' ||
+          (req.headers.origin &&
+            req.headers.origin !== (config.publicOrigin || `http://${req.headers.host}`)))
+      )
+        throw new HttpError(403, '只接受本站操作。');
+      if (town && url.pathname.startsWith('/api/')) {
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          const origin = req.headers.origin;
+          const expected = config.publicOrigin || `http://${req.headers.host}`;
+          if (origin && origin !== expected) throw new HttpError(403, '只接受本站操作。');
+          if (!req.headers['content-type']?.startsWith('application/json'))
+            throw new HttpError(415, '请使用 JSON 请求。');
+        }
+        if (url.pathname === '/api/admin' && req.method === 'POST') {
+          const body = await readJson(req, 10001024);
+          town.admin(req.headers.authorization?.replace(/^Bearer /, ''), body.action, body.replay);
+          return json(res, 200, { ok: true });
+        }
+        const identity = town.identity(req, res);
+        if (url.pathname === '/api/status' && req.method === 'GET')
+          return json(res, 200, {
+            shared: true,
+            configured,
+            model: configured ? String(config.model).slice(0, 80) : null,
+            wireApi: config.wireApi || 'responses',
+          });
+        if (url.pathname === '/api/history' && req.method === 'GET')
+          return json(res, 200, {
+            version: town.version,
+            snapshots: town.store.db
+              .prepare('SELECT world FROM snapshots ORDER BY version')
+              .all()
+              .map((row) => JSON.parse(row.world)),
+          });
+        if (url.pathname === '/api/town' && req.method === 'GET')
+          return json(res, 200, town.snapshot(identity));
+        if (url.pathname === '/api/stream' && req.method === 'GET') {
+          let pending;
+          const disconnect = town.connect(
+            identity,
+            (data) => {
+              const message = `data: ${JSON.stringify(data)}\n\n`;
+              if (!res.headersSent) pending = message;
+              else if (res.writableLength > 1048576) res.destroy();
+              else res.write(message);
+            },
+            String(url.searchParams.get('connection') || 'default').slice(0, 64),
+          );
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache, no-transform',
+            'X-Accel-Buffering': 'no',
+            Connection: 'keep-alive',
+          });
+          res.write('retry: 3000\n\n' + (pending || ''));
+          const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 15000);
+          res.on('close', () => {
+            clearInterval(heartbeat);
+            disconnect();
+          });
+          return;
+        }
+        if (url.pathname === '/api/commands' && req.method === 'POST')
+          return json(res, 202, town.accept(identity, await readJson(req, 4096)));
+        if (/^\/api\/commands\/\d+$/.test(url.pathname) && req.method === 'DELETE') {
+          town.cancel(identity, Number(url.pathname.split('/').at(-1)));
+          return json(res, 200, { ok: true });
+        }
+        if (url.pathname === '/api/presence' && req.method === 'POST') {
+          const body = await readJson(req, 256);
+          town.presence(
+            identity,
+            body.visible === true,
+            String(body.connection || 'default').slice(0, 64),
+          );
+          return json(res, 200, { ok: true });
+        }
+        throw new HttpError(404, '接口不存在。');
+      }
       if (url.pathname === '/api/status' && req.method === 'GET')
         return json(res, 200, {
           configured,

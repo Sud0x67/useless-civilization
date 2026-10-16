@@ -1,0 +1,8 @@
+useless-llm.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:4180 {
+        # Overwrite client-supplied identity headers. Node only trusts this on loopback.
+        header_up X-Real-IP {remote_host}
+        flush_interval -1
+    }
+}

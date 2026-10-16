@@ -48,6 +48,7 @@ export const FeedSchema = z.object({
   actor: z.enum(IDS).nullable(),
   text: z.string().max(500),
   source: z.enum(['local', 'model', 'human']),
+  author: z.string().max(20).optional(),
 });
 export const WorldSchema = z.object({
   seed: z.number().int().min(0).max(4294967295),
@@ -73,6 +74,7 @@ export const WorldSchema = z.object({
         id: z.number().int().nonnegative(),
         agentId: z.enum(IDS),
         role: z.enum(['human', 'model']),
+        author: z.string().max(20).optional(),
         text: z.string().max(500),
         minute: z.number().int().nonnegative(),
         replyTo: z.number().int().nonnegative().optional(),

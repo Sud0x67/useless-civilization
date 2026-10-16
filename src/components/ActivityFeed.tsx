@@ -95,8 +95,8 @@ export function ActivityFeed({
                   <strong>
                     {item.source === 'human'
                       ? item.type === 'chat'
-                        ? `你 → ${actor?.name}`
-                        : '人类观察员'
+                        ? `${item.author || '你'} → ${actor?.name}`
+                        : item.author || '人类观察员'
                       : actor?.name || '世界旁白'}
                   </strong>
                   {item.source === 'model' && <span className="model-tag">AI</span>}

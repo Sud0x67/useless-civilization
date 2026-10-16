@@ -11,6 +11,8 @@ import { Town, type CameraControls } from './components/Town';
 import { Icon } from './components/Icons';
 import { Conversation } from './components/Conversation';
 import { ActivityFeed } from './components/ActivityFeed';
+import { useSharedTown } from './hooks/useSharedTown';
+import type { TownAction } from './shared/town';
 import { RequestScheduler, type ScheduledTask } from './world/request-scheduler';
 import { DecisionSchema, RoundSchema, type Agent, type World } from './shared/schema';
 import {
@@ -30,13 +32,9 @@ import {
   type EventId,
 } from './world/engine';
 
-type Status = { configured: boolean; model: string | null; wireApi: string };
+type Status = { configured: boolean; model: string | null; wireApi: string; shared?: boolean };
 type Modal = 'events' | 'settings' | 'reset' | null;
-type ModelAction =
-  | { type: 'round' }
-  | { type: 'event'; eventId: EventId; prepared?: boolean }
-  | { type: 'chat'; agentId: AgentId; text: string; messageId?: number }
-  | { type: 'join' };
+type ModelAction = TownAction;
 const intervals = { '20s': 20000, '12s': 12000, '8s': 8000 };
 function Avatar({ agent, small = false }: { agent: Agent; small?: boolean }) {
   return (
@@ -142,14 +140,42 @@ export function App() {
   const [scheduler] = useState(
     () => new RequestScheduler<ModelAction>((task, signal) => executeRef.current(task, signal)),
   );
-  const schedule = useSyncExternalStore(scheduler.subscribe, scheduler.getSnapshot);
+  const localSchedule = useSyncExternalStore(scheduler.subscribe, scheduler.getSnapshot);
+  const sharedMode = status?.shared === true;
+  const shared = useSharedTown(sharedMode, !paused && replay === null);
+  const sharedData = shared.data;
+  const ownTasks = sharedData?.tasks.filter((t) => t.mine) || [];
+  const schedule = sharedMode
+    ? {
+        active: sharedData?.active
+          ? sharedData.tasks.find((t) => t.id === sharedData.active!.id) || {
+              ...sharedData.active,
+              action: { type: 'round' } as ModelAction,
+            }
+          : null,
+        waiting: sharedData?.tasks.filter((t) => t.state === 'pending') || [],
+        failed: ownTasks.find((t) => t.state === 'failed') || null,
+        error:
+          shared.error ||
+          ownTasks.find((t) => t.state === 'failed')?.error ||
+          sharedData?.autoError ||
+          '',
+        suspended: false,
+      }
+    : localSchedule;
   const busy = schedule.active !== null;
   const error = connectionError || schedule.error;
+  const pausedWorld = useRef<World | null>(null);
+  const sharedVersion = useRef(0);
   const humanTasks = [schedule.active, schedule.failed, ...schedule.waiting].filter(
     (task): task is ScheduledTask<ModelAction> => task?.kind === 'human',
   );
   const humanPending = humanTasks.length > 0;
-  const queueFull = humanTasks.length >= scheduler.limit;
+  const queueFull = sharedMode
+    ? shared.sending ||
+      ownTasks.filter((t) => t.state !== 'failed').length >=
+        (sharedData?.limits.perVisitorPending || 2)
+    : humanTasks.length >= scheduler.limit;
   const [usage, setUsage] = useState({ calls: 0, input: 0, output: 0 });
   const [modal, setModal] = useState<Modal>(null);
   const [night, setNight] = useState(true);
@@ -159,6 +185,27 @@ export function App() {
   const camera = useRef<CameraControls>(null);
   const file = useRef<HTMLInputElement>(null);
   const firstRound = useRef(false);
+  const spokenThrough = useRef<number | null>(null);
+  useEffect(() => {
+    if (!sharedData) return;
+    const through = sharedData.world.nextId;
+    const previous = spokenThrough.current;
+    spokenThrough.current = through;
+    if (previous === null || previous > through || !sound || !('speechSynthesis' in window)) return;
+    const reply = sharedData.world.conversations
+      .filter(
+        (entry) => entry.id >= previous && entry.role === 'model' && entry.agentId === selected,
+      )
+      .at(-1);
+    if (!reply) return;
+    try {
+      const utterance = new SpeechSynthesisUtterance(reply.text);
+      utterance.lang = 'zh-CN';
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      setNotice('回复已保存，当前浏览器暂时无法朗读。');
+    }
+  }, [sharedData, sound, selected]);
 
   const commit = useCallback((next: World) => {
     worldRef.current = next;
@@ -167,10 +214,47 @@ export function App() {
     snapshotsRef.current = history;
     setSnapshots(history);
   }, []);
+  useEffect(() => {
+    if (!sharedMode) return;
+    const controller = new AbortController();
+    fetch('/api/history', { signal: controller.signal })
+      .then((r) => r.json())
+      .then((data) => {
+        if (
+          controller.signal.aborted ||
+          replayRef.current !== null ||
+          !Array.isArray(data.snapshots)
+        )
+          return;
+        const history = (
+          sharedVersion.current > data.version
+            ? [...data.snapshots, worldRef.current]
+            : data.snapshots
+        ).slice(-120) as World[];
+        snapshotsRef.current = history;
+        setSnapshots(history);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [sharedMode]);
   const pause = useCallback((value: boolean) => {
+    pausedWorld.current = value ? worldRef.current : null;
     setPaused(value);
     idleSince.current = Date.now();
   }, []);
+  useEffect(() => {
+    if (!sharedData || sharedData.version === sharedVersion.current) return;
+    sharedVersion.current = sharedData.version;
+    if (paused && !pausedWorld.current) pausedWorld.current = sharedData.world;
+    worldRef.current = sharedData.world;
+    setWorld(sharedData.world);
+    // Freeze the replay index while viewing history; live state still stays up to date.
+    if (replayRef.current === null) {
+      const history = [...snapshotsRef.current, sharedData.world].slice(-120);
+      snapshotsRef.current = history;
+      setSnapshots(history);
+    }
+  }, [sharedData, paused]);
   const cancel = useCallback(() => scheduler.clear(), [scheduler]);
   const select = useCallback((id: AgentId) => {
     setSelected(id);
@@ -247,9 +331,10 @@ export function App() {
     }
   };
   const run = useCallback(() => {
-    if (replayRef.current !== null || !status?.configured || document.hidden) return false;
+    if (sharedMode || replayRef.current !== null || !status?.configured || document.hidden)
+      return false;
     return scheduler.automatic({ type: 'round' });
-  }, [scheduler, status]);
+  }, [scheduler, status, sharedMode]);
   function describe(task: ScheduledTask<ModelAction>) {
     const action = task.action;
     if (action.type === 'event')
@@ -258,7 +343,16 @@ export function App() {
       return `对${worldRef.current.agents.find((a) => a.id === action.agentId)!.name}说：${action.text}`;
     return action.type === 'join' ? '作为人类加入小镇' : '小镇自动决策';
   }
-  function submit(action: ModelAction) {
+  async function submit(action: ModelAction) {
+    if (sharedMode) {
+      if (replayRef.current !== null || !shared.connected) return false;
+      const accepted = await shared.command(action);
+      if (accepted) {
+        pause(false);
+        setNotice('已加入共享队列，所有人都能看到这次互动。');
+      }
+      return accepted;
+    }
     if (replayRef.current !== null || !status?.configured) return false;
     const task = scheduler.enqueue(action);
     if (!task) {
@@ -318,6 +412,7 @@ export function App() {
   }, [cancel, pause, scheduler]);
   useEffect(() => {
     if (
+      !sharedMode &&
       status?.configured &&
       !firstRound.current &&
       visible &&
@@ -327,9 +422,10 @@ export function App() {
     ) {
       if (run()) firstRound.current = true;
     }
-  }, [status, visible, replay, paused, run, humanPending]);
+  }, [status, visible, replay, paused, run, humanPending, sharedMode]);
   useEffect(() => {
     if (
+      sharedMode ||
       !status?.configured ||
       paused ||
       !visible ||
@@ -347,16 +443,24 @@ export function App() {
       void run();
     }, intervals[speed]);
     return () => clearInterval(interval);
-  }, [status, paused, visible, replay, modal, speed, run, pause, humanPending]);
+  }, [status, paused, visible, replay, modal, speed, run, pause, humanPending, sharedMode]);
   useEffect(() => {
     if (!notice) return;
     const timeout = setTimeout(() => setNotice(''), 5000);
     return () => clearTimeout(timeout);
   }, [notice]);
 
-  const view = replay === null ? world : snapshots[replay] || world;
+  const view =
+    replay === null
+      ? sharedMode && paused && pausedWorld.current
+        ? pausedWorld.current
+        : world
+      : snapshots[replay] || world;
   const agent = view.agents.find((a) => a.id === selected) || null;
-  const interactionLocked = replay !== null || !status?.configured;
+  const interactionLocked =
+    replay !== null ||
+    !status?.configured ||
+    (sharedMode && (!shared.connected || !sharedData?.running));
   const disabled = busy || humanPending || interactionLocked;
   const message = selected ? drafts[selected] || '' : '';
   const joinPending = humanTasks.some((t) => t.action.type === 'join');
@@ -370,10 +474,16 @@ export function App() {
     replayRef.current = null;
     setReplay(null);
     if (!document.hidden) scheduler.resume();
-    setNotice('已返回当前世界，点击播放继续。');
+    if (sharedMode) {
+      pause(false);
+      const history = [...snapshotsRef.current, worldRef.current].slice(-120);
+      snapshotsRef.current = history;
+      setSnapshots(history);
+    }
+    setNotice('已返回当前世界。');
   }
-  function event(id: EventId) {
-    if (submit({ type: 'event', eventId: id })) setModal(null);
+  async function event(id: EventId) {
+    if (await submit({ type: 'event', eventId: id })) setModal(null);
   }
   function download() {
     const blob = new Blob([exportReplay(snapshotsRef.current)], { type: 'application/json' });
@@ -387,6 +497,10 @@ export function App() {
   }
   async function upload(input: File | undefined) {
     if (!input) return;
+    if (sharedMode) {
+      setNotice('共享世界只允许管理员导入存档。');
+      return;
+    }
     try {
       if (input.size > 5000000) throw new Error('回放文件不能超过 5 MB。');
       const history = importReplay(await input.text());
@@ -412,6 +526,10 @@ export function App() {
     }
   }
   function reset() {
+    if (sharedMode) {
+      setNotice('共享世界只允许管理员重置。');
+      return;
+    }
     cancel();
     if (!document.hidden) scheduler.resume();
     setDrafts({});
@@ -433,13 +551,19 @@ export function App() {
       ? '正在回放'
       : busy
         ? schedule.active?.kind === 'human'
-          ? '正在回应你的操作'
+          ? sharedMode
+            ? '正在回应人类互动'
+            : '正在回应你的操作'
           : '居民思考中'
         : !visible
           ? '页面已休眠'
           : paused
             ? '观察已暂停'
-            : '世界运行中';
+            : sharedMode && !shared.connected
+              ? '正在重新连接'
+              : sharedMode && !sharedData?.running
+                ? '小镇暂时休息'
+                : '世界运行中';
 
   return (
     <div className="app-shell">
@@ -525,7 +649,12 @@ export function App() {
             </span>
           </div>
           <div className="sidebar-footer">
-            <span className="tiny-dot" />6 位 AI 居民 · {view.human ? '1 位人类' : '0 位人类'}
+            <span className="tiny-dot" />6 位 AI 居民 ·{' '}
+            {sharedMode
+              ? `${sharedData?.online || 0} 个在线观察窗口`
+              : view.human
+                ? '1 位人类'
+                : '0 位人类'}
           </div>
         </aside>
 
@@ -649,28 +778,33 @@ export function App() {
               >
                 <Icon name={paused ? 'play' : 'pause'} size={17} />
               </button>
-              <ToolButton
-                label="运行一轮"
-                icon="skip"
-                disabled={disabled}
-                onClick={() => {
-                  pause(true);
-                  void run();
-                }}
-              />
-              <span className="deck-divider" />
-              <div className="speed-switch" aria-label="运行间隔">
-                {(Object.keys(intervals) as (keyof typeof intervals)[]).map((s) => (
-                  <button
-                    key={s}
-                    className={speed === s ? 'active' : ''}
-                    onClick={() => setSpeed(s)}
-                    aria-pressed={speed === s}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
+              {!sharedMode && (
+                <>
+                  <ToolButton
+                    label="运行一轮"
+                    icon="skip"
+                    disabled={disabled || sharedMode}
+                    onClick={() => {
+                      pause(true);
+                      void run();
+                    }}
+                  />
+                  <span className="deck-divider" />
+                  <div className="speed-switch" aria-label="运行间隔">
+                    {(Object.keys(intervals) as (keyof typeof intervals)[]).map((s) => (
+                      <button
+                        key={s}
+                        className={speed === s ? 'active' : ''}
+                        disabled={sharedMode}
+                        onClick={() => setSpeed(s)}
+                        aria-pressed={speed === s}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
               <span className="round-label">第 {view.tick} 轮</span>
             </div>
             <div className="deck-actions">
@@ -694,6 +828,25 @@ export function App() {
               </button>
             </div>
           </div>
+          {sharedMode && (
+            <div className="shared-status" role="status" aria-label="共享小镇状态">
+              <span>{shared.connected ? '共享小镇 · 实时连接' : '连接中 · 暂时无法提交'}</span>
+              <span>
+                今日参与 {sharedData?.quota.usedDay || 0}/{sharedData?.quota.dayLimit || 60} ·
+                每小时 {sharedData?.quota.hourLimit || 20} 次 · 间隔 10 秒
+              </span>
+              <span>
+                全站今日模型 {sharedData?.budget.dayUsed || 0}/{sharedData?.budget.dayLimit || 500}{' '}
+                次
+              </span>
+              {!!sharedData?.budget.resetsAt && (
+                <span>额度恢复：{new Date(sharedData.budget.resetsAt).toLocaleString()}</span>
+              )}
+              <small>
+                聊天和事件对所有访客公开。匿名限额结合 Cookie 与 IP，累计用量保存在服务器。
+              </small>
+            </div>
+          )}
           {humanPending && (
             <section className="interaction-queue" aria-label="人类操作队列">
               <div className="queue-heading" role="status">
@@ -704,7 +857,9 @@ export function App() {
                     : schedule.failed
                       ? '回应失败，等待重试'
                       : schedule.active?.kind === 'human'
-                        ? '正在处理你的操作'
+                        ? sharedMode
+                          ? '正在处理共享互动'
+                          : '正在处理你的操作'
                         : '等待处理'}
                 </strong>
                 <small>{schedule.waiting.length} 项等待</small>
@@ -719,24 +874,29 @@ export function App() {
                         ? '处理中'
                         : '等待中'}
                   </small>
-                  {schedule.waiting.some((t) => t.id === task.id) && (
-                    <button
-                      aria-label={`取消等待：${describe(task)}`}
-                      title="取消等待"
-                      onClick={() => {
-                        scheduler.remove(task.id);
-                        if (task.action.type === 'chat' && task.action.messageId === undefined) {
-                          const action = task.action;
-                          setDrafts((old) => ({
-                            ...old,
-                            [action.agentId]: old[action.agentId] || action.text,
-                          }));
-                        }
-                      }}
-                    >
-                      <Icon name="close" size={12} />
-                    </button>
-                  )}
+                  {schedule.waiting.some((t) => t.id === task.id) &&
+                    (!sharedMode || ownTasks.some((t) => t.id === task.id)) && (
+                      <button
+                        aria-label={`取消等待：${describe(task)}`}
+                        title="取消等待"
+                        onClick={() => {
+                          if (sharedMode) {
+                            void shared.cancel(task.id);
+                            return;
+                          }
+                          scheduler.remove(task.id);
+                          if (task.action.type === 'chat' && task.action.messageId === undefined) {
+                            const action = task.action;
+                            setDrafts((old) => ({
+                              ...old,
+                              [action.agentId]: old[action.agentId] || action.text,
+                            }));
+                          }
+                        }}
+                      >
+                        <Icon name="close" size={12} />
+                      </button>
+                    )}
                 </div>
               ))}
             </section>
@@ -754,6 +914,13 @@ export function App() {
                     setModal('settings');
                     return;
                   }
+                  if (sharedMode) {
+                    if (schedule.failed)
+                      void shared.command({ type: 'retry', id: schedule.failed.id });
+                    else if (shared.error) shared.clearError();
+                    else setModal('events');
+                    return;
+                  }
                   scheduler.retry();
                 }}
                 disabled={busy || schedule.suspended}
@@ -762,7 +929,13 @@ export function App() {
                 <Icon name="refresh" size={13} />
               </button>
               {schedule.failed?.kind === 'human' && (
-                <button onClick={() => scheduler.skipFailed()}>跳过本次回应</button>
+                <button
+                  onClick={() =>
+                    sharedMode ? void shared.cancel(schedule.failed!.id) : scheduler.skipFailed()
+                  }
+                >
+                  跳过本次回应
+                </button>
               )}
             </div>
           )}
@@ -772,7 +945,9 @@ export function App() {
                 <Icon name="history" size={14} />
                 世界回放
               </span>
-              <small>{snapshots.length} 个瞬间 · 仅保存在内存</small>
+              <small>
+                {snapshots.length} 个瞬间 · {sharedMode ? '共享世界已自动存档' : '仅保存在内存'}
+              </small>
               {replay !== null && (
                 <button onClick={leaveReplay}>
                   返回当前世界
@@ -807,7 +982,9 @@ export function App() {
                 ? '正在等待模型响应…'
                 : paused
                   ? '点击播放继续观察'
-                  : `每 ${intervals[speed] / 1000} 秒尝试一轮 · 每轮 15 分钟`}
+                  : sharedMode
+                    ? '全镇共享进度 · 暂停仅影响自己观看'
+                    : `每 ${intervals[speed] / 1000} 秒尝试一轮 · 每轮 15 分钟`}
             </span>
           </div>
         </section>
@@ -900,6 +1077,7 @@ export function App() {
                   aria-labelledby="conversation-tab"
                 >
                   <Conversation
+                    visitor={sharedData?.you}
                     agent={agent}
                     entries={view.conversations.filter((e) => e.agentId === agent.id)}
                     pending={
@@ -911,6 +1089,9 @@ export function App() {
                             )
                             .map((t) => ({
                               id: t.id,
+                              author: sharedMode
+                                ? sharedData?.tasks.find((task) => task.id === t.id)?.author
+                                : undefined,
                               text: t.action.type === 'chat' ? t.action.text : '',
                               messageId: t.action.type === 'chat' ? t.action.messageId : undefined,
                               state:
@@ -923,9 +1104,12 @@ export function App() {
                     }
                     draft={message}
                     onDraft={(text) => setDrafts((old) => ({ ...old, [agent.id]: text }))}
-                    onSend={() => {
-                      if (submit({ type: 'chat', agentId: agent.id, text: message.trim() }))
-                        setDrafts((old) => ({ ...old, [agent.id]: '' }));
+                    onSend={async () => {
+                      if (await submit({ type: 'chat', agentId: agent.id, text: message.trim() }))
+                        setDrafts((old) => ({
+                          ...old,
+                          [agent.id]: old[agent.id] === message ? '' : old[agent.id],
+                        }));
                     }}
                     locked={interactionLocked}
                     full={queueFull}
@@ -1015,9 +1199,13 @@ export function App() {
         <span>
           无脚本对白
           <span className="tiny-dot" />
-          {usage.calls} 次调用
+          {sharedMode ? sharedData?.usage.calls || 0 : usage.calls} 次调用
           <span className="tiny-dot" />
-          {(usage.input + usage.output).toLocaleString()} tokens
+          {(sharedMode
+            ? (sharedData?.usage.input || 0) + (sharedData?.usage.output || 0)
+            : usage.input + usage.output
+          ).toLocaleString()}{' '}
+          tokens
         </span>
       </footer>
       {notice && (
@@ -1066,9 +1254,13 @@ export function App() {
             ))}
           </div>
           <p className="modal-footnote">
-            {queueFull
-              ? '等待队列已满（最多 12 项），请等待完成或取消部分操作。'
-              : '提交后自动请求居民回应，无需暂停。连续投放将按顺序处理。'}
+            {sharedMode && shared.error
+              ? shared.error
+              : queueFull
+                ? sharedMode
+                  ? '你已有待处理操作，请等待完成后继续。'
+                  : '等待队列已满（最多 12 项），请等待完成或取消部分操作。'
+                : '提交后自动请求居民回应，无需暂停。连续投放将按顺序处理。'}
           </p>
         </ModalShell>
       )}
@@ -1108,7 +1300,9 @@ export function App() {
               </p>
             )}
             <small>
-              密钥仅留在本地服务器。页面隐藏或观察 10 分钟无操作时停止调用。回放期间不调用模型。
+              {sharedMode
+                ? '密钥仅在服务器。所有人的对话与事件公开；暂停观看、回放、关闭页面不影响别人。无人观看时停止自动推进。'
+                : '密钥仅留在本地服务器。页面隐藏或观察 10 分钟无操作时停止调用。回放期间不调用模型。'}
             </small>
           </div>
           <div className="settings-row">
@@ -1135,17 +1329,27 @@ export function App() {
               <Icon name="download" size={15} />
               导出回放
             </button>
-            <button className="secondary-button" onClick={() => file.current?.click()}>
+            <button
+              className="secondary-button"
+              disabled={sharedMode}
+              onClick={() => file.current?.click()}
+            >
               <Icon name="upload" size={15} />
               导入回放
             </button>
-            <button className="danger-button" onClick={() => setModal('reset')}>
+            <button
+              className="danger-button"
+              disabled={sharedMode}
+              onClick={() => setModal('reset')}
+            >
               <Icon name="refresh" size={15} />
               重置世界
             </button>
           </div>
           <p className="modal-footnote">
-            世界只保存在本页内存，刷新后重新开始。请导出回放以保存进展。此预览尚未绑定域名。
+            {sharedMode
+              ? '小镇由服务器 SQLite 自动保存，刷新后继续同一座小镇。匿名访客可以参与，管理操作由站点管理员执行。'
+              : '世界只保存在本页内存，刷新后重新开始。请导出回放以保存进展。此预览尚未绑定域名。'}
           </p>
         </ModalShell>
       )}

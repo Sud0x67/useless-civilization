@@ -7,6 +7,7 @@ export type PendingChat = {
   id: number;
   text: string;
   messageId?: number;
+  author?: string;
   state: 'active' | 'waiting' | 'failed';
 };
 export function Conversation({
@@ -18,6 +19,7 @@ export function Conversation({
   onSend,
   locked,
   full,
+  visitor,
 }: {
   agent: Agent;
   entries: ChatEntry[];
@@ -27,6 +29,7 @@ export function Conversation({
   onSend: () => void;
   locked: boolean;
   full: boolean;
+  visitor?: string;
 }) {
   const history = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
@@ -65,7 +68,13 @@ export function Conversation({
           return (
             <article key={entry.id} className={`chat-bubble ${entry.role}`}>
               <span>
-                {entry.role === 'human' ? '你' : agent.name}
+                {entry.role === 'human'
+                  ? entry.author
+                    ? entry.author === visitor
+                      ? '你 · ' + entry.author
+                      : entry.author
+                    : '你'
+                  : agent.name}
                 <time>{formatTime(entry.minute)}</time>
               </span>
               <p>{entry.text}</p>
@@ -80,7 +89,8 @@ export function Conversation({
           .map((task) => (
             <article key={`pending-${task.id}`} className="chat-bubble human pending">
               <span>
-                你<small>{label(task.state)}</small>
+                {task.author || '你'}
+                <small>{label(task.state)}</small>
               </span>
               <p>{task.text}</p>
             </article>
