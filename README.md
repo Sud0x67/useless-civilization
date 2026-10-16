@@ -2,7 +2,7 @@
 
 一座漂浮在夜空中的共享小镇，六位性格不同的 AI 居民。居民的行动、对白和公开行动说明来自真实模型，没有脚本对白或失败时的预设回复。
 
-所有访客匿名围观和参与同一座小镇：聊天、事件和居民回应公开；服务器串行执行操作并通过 SSE 实时同步。**一台支持 Node.js 24 的阿里云轻量服务器即可运行，SQLite 随应用保存数据，不需要云数据库。** 当前代码在 `~/code/useless-civilization`，已部署到轻量服务器；公网域名仍等待备案/接入和 DNS 配置，详见 [部署记录](deploy/production.md)。
+所有访客匿名围观和参与同一座小镇：聊天、事件和居民回应公开；服务器串行执行操作并通过 SSE 实时同步。**一台支持 Node.js 24 的阿里云轻量服务器即可运行，SQLite 随应用保存数据，不需要云数据库。** 当前代码在 `~/code/useless-civilization`，已部署到新加坡轻量服务器，正式网站为 **https://useless-llm.com/**，详见 [部署记录](deploy/production.md)。
 
 ## 本地运行
 
@@ -110,7 +110,7 @@ sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
-如果服务器已有 Caddy 站点，将本项目的站点块合并到配置，不要覆盖其他站点。DNS 将 `useless-llm.com` 的 A 记录指向服务器公网 IP；安全组开放 80、443 和所需 SSH 端口，**不要开放 4180**。Caddy 必须覆盖客户端传入的 `X-Real-IP`，示例已配置；不要把不可信代理放到此信任链中。SSE 已关闭代理缓冲，慢连接超过发送缓冲上限会断开并自动重连。
+如果服务器已有 Caddy 站点，将本项目的站点块合并到配置，不要覆盖其他站点。DNS 将 `useless-llm.com` 的 A 记录指向服务器公网 IP；安全组开放 80、443 和所需 SSH 端口，**不要开放 4180**。Caddy 必须覆盖客户端传入的 `X-Real-IP`，示例已配置；不要把不可信代理放到此信任链中。SSE 接口明确排除压缩，使用 Caddy 对事件流的默认即时刷新；不要添加 `flush_interval -1`，以便浏览器关闭时及时释放上游连接。慢连接超过发送缓冲上限会断开并自动重连。
 
 排查：`systemctl status useless-civilization`、`journalctl -u useless-civilization -n 100`。更新代码后重新 `npm ci && npm run build`，再 `sudo systemctl restart useless-civilization`，保留环境文件和 `/var/lib/useless-civilization`。不要把数据库放到临时目录或在更新时删除。
 
