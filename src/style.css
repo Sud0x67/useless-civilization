@@ -188,9 +188,14 @@ p {
   border: 1px solid #2c4036;
   border-radius: 6px;
   padding: 7px 9px;
+  cursor: pointer;
   font:
     10px ui-monospace,
     monospace;
+}
+.model-badge:focus-visible {
+  outline: 2px solid #b8d29f;
+  outline-offset: 3px;
 }
 .icon-button {
   width: 32px;
@@ -2570,4 +2575,415 @@ p {
 .shared-status strong {
   color: var(--subtle);
   font-weight: 500;
+}
+
+.town-council {
+  margin: 14px 0;
+  padding: 17px;
+  border: 1px solid #33483e;
+  border-radius: 12px;
+  background: linear-gradient(130deg, #172722, #141b23 85%);
+}
+.council-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.council-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #d1dfd5;
+}
+.council-badge {
+  font-size: 9px;
+  padding: 3px 6px;
+  border: 1px solid #486348;
+  border-radius: 4px;
+  color: #b2d8a5;
+}
+.council-badge.closed {
+  color: #aebac4;
+  border-color: #44515c;
+}
+.council-heading time {
+  margin-left: auto;
+  font-size: 12px;
+  color: #c3d5bd;
+  font-variant-numeric: tabular-nums;
+}
+.town-council h3 {
+  margin: 17px 0 7px;
+  font-size: 17px;
+  line-height: 1.5;
+  font-weight: 500;
+  color: #e0e7df;
+}
+.council-description,
+.council-empty {
+  font-size: 11px;
+  line-height: 1.7;
+  color: #a4b1aa;
+}
+.council-empty {
+  margin-bottom: 0;
+}
+.council-impact {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 10px;
+  line-height: 1.7;
+  color: #c7bb94;
+  margin: 12px 0 18px;
+}
+.council-impact svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.council-votes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px 14px;
+  align-items: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.council-votes strong {
+  color: #bad4b2;
+  font-weight: 500;
+}
+.council-votes > span {
+  color: #d9a599;
+}
+.council-votes small {
+  margin-left: auto;
+  color: #9ba8a3;
+  font-size: 10px;
+}
+.council-meter {
+  height: 4px;
+  margin: 9px 0 15px;
+  background: #8a625d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.council-meter > span {
+  display: block;
+  height: 100%;
+  background: #96b58c;
+}
+.council-actions {
+  display: flex;
+  gap: 9px;
+}
+.council-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 1;
+  min-height: 40px;
+  border: 1px solid #41584a;
+  border-radius: 6px;
+  background: #1c3027;
+  color: #c4d9bd;
+  font-size: 12px;
+  cursor: pointer;
+}
+.council-actions button:last-child {
+  border-color: #604841;
+  background: #302421;
+  color: #dec0b5;
+}
+.council-actions button[aria-pressed='true'] {
+  box-shadow: inset 0 0 0 1px currentColor;
+  opacity: 1;
+}
+.council-actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.council-actions button[aria-pressed='true']:disabled {
+  opacity: 1;
+}
+.council-actions button:focus-visible,
+.council-opinions summary:focus-visible {
+  outline: 2px solid #c3d9b3;
+  outline-offset: 3px;
+}
+.council-hint,
+.council-rule {
+  font-size: 10px;
+  line-height: 1.6;
+  color: #9aa99e;
+}
+.council-rule {
+  margin: 13px 0 0;
+}
+.council-result {
+  color: #cadfc3;
+  font-size: 12px;
+  margin: 0 0 13px;
+}
+.council-error {
+  color: #f0b1a2;
+  font-size: 11px;
+}
+.council-opinions {
+  border-top: 1px solid #304039;
+  margin-top: 14px;
+  padding-top: 12px;
+}
+.council-opinions summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: #b5c3b8;
+}
+.council-opinions summary span {
+  color: #94a194;
+  margin-left: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.council-opinion {
+  padding: 12px 0 3px;
+}
+.council-resident {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+}
+.council-resident small {
+  color: #a2afa5;
+  font-size: 9px;
+}
+.council-opinion p {
+  color: #c0ccc3;
+  font-size: 11px;
+  line-height: 1.8;
+  margin: 5px 0;
+  overflow-wrap: anywhere;
+}
+.town-constitution {
+  margin-top: 15px;
+  border-top: 1px solid #304039;
+  padding-top: 13px;
+}
+.town-constitution summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #c4d4bc;
+}
+.town-constitution summary > span {
+  margin-left: 8px;
+  font-size: 10px;
+  color: #9faa9b;
+}
+.town-constitution article {
+  padding: 15px 0;
+  border-bottom: 1px solid #2b3932;
+}
+.constitution-intro {
+  font-size: 10px;
+  color: #a1b09f;
+  line-height: 1.7;
+}
+.constitution-meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 10px;
+  color: #bdcbb5;
+}
+.constitution-meta strong {
+  font-weight: 500;
+}
+.constitution-meta time {
+  margin-left: auto;
+  color: #9ca797;
+  font-size: 9px;
+}
+.town-constitution h4 {
+  font-size: 12px;
+  font-weight: 500;
+  color: #d7dfd2;
+  margin: 9px 0 5px;
+  line-height: 1.7;
+}
+.town-constitution article p {
+  color: #b6c2b1;
+  font-size: 11px;
+  line-height: 1.8;
+  margin: 0 0 7px;
+}
+.town-constitution article small {
+  color: #9da998;
+  font-size: 9px;
+  line-height: 1.8;
+}
+.constitution-more {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  margin-top: 13px;
+  border: 1px solid #405344;
+  border-radius: 5px;
+  background: #1a2922;
+  color: #c5d4bd;
+  font-size: 11px;
+  cursor: pointer;
+}
+.town-constitution summary:focus-visible,
+.constitution-more:focus-visible {
+  outline: 2px solid #c3d9b3;
+  outline-offset: 3px;
+}
+.constitution-entry {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  background: #17241e;
+  border: 1px solid #394e3d;
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: #c5d5bb;
+  font-size: 11px;
+  cursor: pointer;
+}
+.council-launcher {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 12px 0;
+  padding: 13px;
+  border: 1px solid #344c3c;
+  border-radius: 9px;
+  background: #18261f;
+  color: #bfceb9;
+  text-align: left;
+  cursor: pointer;
+}
+.council-launcher > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+}
+.council-launcher strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+}
+.council-launcher small {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  color: #a0b29f;
+}
+.council-launcher > span:last-of-type {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.proposed-rule {
+  padding: 11px 12px;
+  margin: 12px 0;
+  border-left: 2px solid #9db88c;
+  background: #213129;
+  color: #d1dfc9;
+  font-size: 12px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.civic-dialog-actions,
+.law-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.civic-dialog-actions button,
+.law-actions button {
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid #405b45;
+  border-radius: 6px;
+  background: #1c3024;
+  color: #c9dcc0;
+  font-size: 11px;
+  cursor: pointer;
+}
+.civic-dialog-actions button:last-child {
+  margin-left: auto;
+}
+.law-text {
+  padding-top: 9px;
+  overflow-wrap: anywhere;
+}
+.constitution-form {
+  margin-top: 17px;
+  padding: 14px;
+  background: #17291e;
+  border: 1px solid #40543d;
+  border-radius: 8px;
+}
+.constitution-form h3 {
+  font-size: 14px;
+  color: #d3dfc9;
+}
+.constitution-form label {
+  display: block;
+  margin-top: 12px;
+  color: #b9cbb0;
+  font-size: 11px;
+}
+.constitution-form textarea,
+.constitution-form select {
+  display: block;
+  width: 100%;
+  margin-top: 7px;
+  padding: 9px;
+  border: 1px solid #486143;
+  border-radius: 5px;
+  background: #101c15;
+  color: #dae7d3;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.constitution-form textarea {
+  resize: vertical;
+}
+.constitution-entry:focus-visible,
+.council-launcher:focus-visible,
+.law-actions button:focus-visible,
+.civic-dialog-actions button:focus-visible {
+  outline: 2px solid #b8d29f;
+  outline-offset: 3px;
+}
+
+.constitution-search {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.constitution-search input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #405344;
+  border-radius: 8px;
+  padding: 10px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}
+
+.constitution-search input:focus-visible {
+  outline: 2px solid #b8d29f;
+  outline-offset: 3px;
 }

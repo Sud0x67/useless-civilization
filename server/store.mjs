@@ -28,6 +28,27 @@ export class TownStore {
         output INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS calls_time ON calls(created);
+      CREATE TABLE IF NOT EXISTS model_failures (
+        call_id INTEGER PRIMARY KEY, created INTEGER NOT NULL, kind TEXT NOT NULL, diagnostic TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS council_votes (
+        motion_id TEXT NOT NULL, owner TEXT NOT NULL, ip TEXT NOT NULL,
+        choice TEXT NOT NULL CHECK(choice IN ('yes','no')), updated INTEGER NOT NULL,
+        PRIMARY KEY (motion_id, owner)
+      );
+      CREATE INDEX IF NOT EXISTS council_vote_ip ON council_votes(motion_id, ip);
+      CREATE TABLE IF NOT EXISTS council_attendees (
+        motion_id TEXT NOT NULL, owner TEXT NOT NULL, PRIMARY KEY(motion_id, owner)
+      );
+      CREATE TABLE IF NOT EXISTS constitution_articles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, motion_id TEXT UNIQUE NOT NULL, article TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS council_proposals (owner TEXT NOT NULL, ip TEXT NOT NULL, created INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS council_proposal_time ON council_proposals(created);
+      CREATE TABLE IF NOT EXISTS council_ai_proposals (
+        motion_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, created INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS council_ai_proposal_time ON council_ai_proposals(created);
     `);
     if (!this.get('secret')) this.set('secret', randomBytes(32).toString('hex'));
     if (!this.get('world')) {

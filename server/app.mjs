@@ -98,6 +98,28 @@ export function createHandler({
           });
         if (url.pathname === '/api/town' && req.method === 'GET')
           return json(res, 200, town.snapshot(identity));
+        if (url.pathname === '/api/constitution' && req.method === 'GET') {
+          return json(res, 200, { laws: town.world.laws || [] });
+        }
+        if (url.pathname === '/api/council/history' && req.method === 'GET') {
+          const raw = url.searchParams.get('before');
+          const before = raw === null ? Number.MAX_SAFE_INTEGER : Number(raw);
+          if (!Number.isSafeInteger(before) || before <= 0)
+            throw new HttpError(400, '页码不正确。');
+          const rows = town.store.db
+            .prepare(
+              'SELECT article FROM constitution_articles WHERE id<? ORDER BY id DESC LIMIT 21',
+            )
+            .all(before);
+          return json(res, 200, {
+            articles: rows.slice(0, 20).map((row) => JSON.parse(row.article)),
+            hasMore: rows.length > 20,
+          });
+        }
+        if (url.pathname === '/api/council/vote' && req.method === 'POST')
+          return json(res, 200, town.vote(identity, await readJson(req, 256)));
+        if (url.pathname === '/api/council/propose' && req.method === 'POST')
+          return json(res, 200, town.propose(identity, await readJson(req, 2048)));
         if (url.pathname === '/api/stream' && req.method === 'GET') {
           let pending;
           const disconnect = town.connect(
@@ -136,6 +158,7 @@ export function createHandler({
             identity,
             body.visible === true,
             String(body.connection || 'default').slice(0, 64),
+            body.online === undefined ? body.visible === true : body.online === true,
           );
           return json(res, 200, { ok: true });
         }

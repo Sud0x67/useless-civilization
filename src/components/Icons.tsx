@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 const paths: Record<string, string> = {
   cube: 'm12 3 9 5v8l-9 5-9-5V8zM3 8l9 5 9-5M12 13v8M7.5 5.5l9 5',
+  book: 'M12 5C9 3 6 3 3 4v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1v15',
   play: 'm8 5 11 7-11 7z',
   pause: 'M8 5v14M16 5v14',
   skip: 'm5 5 10 7-10 7zM19 5v14',

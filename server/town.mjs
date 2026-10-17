@@ -1,8 +1,25 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { TownStore } from './store.mjs';
-import { HttpError, requestModel } from './model.mjs';
-import { IDS, EVENT_IDS, DecisionSchema, RoundSchema } from '../src/shared/schema.ts';
+import { HttpError, ModelError, validationDetails, requestModel } from './model.mjs';
+import {
+  IDS,
+  EVENT_IDS,
+  DecisionSchema,
+  RoundSchema,
+  VoteChoiceSchema,
+  CouncilProposalSchema,
+} from '../src/shared/schema.ts';
+import {
+  councilTopics,
+  COUNCIL_BREAK,
+  AI_PROPOSAL_MAX_DELAY,
+  proposalError,
+  openCouncil,
+  closeCouncil,
+  recordCouncilOpinions,
+  councilTally,
+} from '../src/world/council.ts';
 import {
   addHumanMessage,
   applyChatReply,
@@ -23,6 +40,7 @@ const Action = z.discriminatedUnion('type', [
     .strict(),
   z.object({ type: z.literal('event'), eventId: z.enum(EVENT_IDS) }).strict(),
   z.object({ type: z.literal('join') }).strict(),
+  z.object({ type: z.literal('round') }).strict(),
   z.object({ type: z.literal('retry'), id: z.number().int().positive() }).strict(),
 ]);
 export const CommandSchema = z.object({ requestId: z.string().uuid(), action: Action }).strict();
@@ -53,6 +71,8 @@ export class SharedTown {
     model = requestModel,
     now = Date.now,
     clock = true,
+    council = true,
+    draw = randomInt,
   } = {}) {
     this.store = new TownStore(path);
     this.config = config;
@@ -61,19 +81,58 @@ export class SharedTown {
       if (!Number.isFinite(value) || value <= 0) throw new Error('共享小镇限额必须为正数');
     this.model = model;
     this.now = now;
+    this.councilEnabled = council;
+    this.draw = draw;
+    if (!this.store.get('next_council_proposal_at')) this.scheduleProposal();
     this.world = JSON.parse(this.store.get('world'));
     this.version = Number(this.store.get('version'));
+    if (!this.store.get('current_constitution_v1')) {
+      this.store.transaction(() => {
+        if (!this.world.laws) {
+          const laws = new Map();
+          for (const row of this.store.db
+            .prepare('SELECT article FROM constitution_articles ORDER BY id')
+            .all()) {
+            const article = JSON.parse(row.article);
+            if (article.result !== 'passed') continue;
+            if (article.operation === 'repeal') {
+              laws.delete(article.topic);
+              continue;
+            }
+            const topic = councilTopics.find((item) => item.id === article.topic);
+            if (topic)
+              laws.set(topic.id, {
+                topic: topic.id,
+                rule: article.rule || topic.rule,
+                revision: (laws.get(topic.id)?.revision || 0) + 1,
+                updatedAt: article.decidedAt,
+                motionId: article.motionId,
+              });
+          }
+          if (laws.size) {
+            this.world = { ...this.world, laws: [...laws.values()] };
+            this.version = this.store.saveWorld(this.world);
+          }
+        }
+        this.store.set('current_constitution_v1', 'true');
+      });
+    }
     this.listeners = new Set();
     this.active = null;
     this.controller = null;
     this.nextTurn = now() + this.limits.interval;
     this.closed = false;
     this.lastMaintenance = 0;
-    this.autoError = '';
+    this.autoError = this.store.get('auto_error') || '';
+    this.queueCouncilRound();
     if (clock) {
       this.timer = setInterval(() => this.tick(), 1000);
       this.timer.unref();
     }
+  }
+  setAutoError(message) {
+    this.autoError = message;
+    this.store.set('auto_error', message);
   }
   configured() {
     return Boolean(this.config.baseUrl && this.config.model);
@@ -179,7 +238,230 @@ export class SharedTown {
       budget: this.budget(),
       usage,
       limits: this.limits,
+      serverTime: this.now(),
+      councilVote: this.world.council
+        ? this.store.db
+            .prepare('SELECT choice FROM council_votes WHERE motion_id=? AND owner=?')
+            .get(this.world.council.id, identity.owner)?.choice || null
+        : null,
+      constitutionCount: this.world.laws?.length || 0,
     };
+  }
+  attendCouncil(identity) {
+    const motion = this.world.council;
+    if (!motion || motion.status !== 'open' || this.now() >= motion.closesAt) return;
+    this.store.db
+      .prepare('INSERT OR IGNORE INTO council_attendees VALUES (?, ?)')
+      .run(motion.id, identity.owner);
+  }
+  finishCouncil() {
+    const motion = this.world.council;
+    const now = this.now();
+    if (!motion || motion.status !== 'open' || now < motion.closesAt) return;
+    this.transaction(() => {
+      const world = structuredClone(this.world);
+      world.council.visitorAbstain = this.store.db
+        .prepare(
+          'SELECT count(*) AS n FROM council_attendees a WHERE motion_id=? AND NOT EXISTS (SELECT 1 FROM council_votes v WHERE v.motion_id=a.motion_id AND v.owner=a.owner)',
+        )
+        .get(motion.id).n;
+      const next = closeCouncil(world, now);
+      const tally = councilTally(next.council);
+      const article = {
+        motionId: motion.id,
+        topic: motion.topic,
+        decidedAt: now,
+        result: next.council.result,
+        yes: tally.yes,
+        no: tally.no,
+        residentAbstain: 6 - motion.residents.length,
+        visitorAbstain: next.council.visitorAbstain,
+        ...(motion.lawId ? { lawId: motion.lawId } : {}),
+        operation: next.council.operation || 'adopt',
+        rule: next.council.rule || councilTopics.find((topic) => topic.id === motion.topic).rule,
+      };
+      const inserted = this.store.db
+        .prepare('INSERT INTO constitution_articles(motion_id,article) VALUES (?, ?)')
+        .run(motion.id, JSON.stringify(article));
+      article.id = Number(inserted.lastInsertRowid);
+      this.store.db
+        .prepare('UPDATE constitution_articles SET article=? WHERE id=?')
+        .run(JSON.stringify(article), article.id);
+      next.constitution = [...(next.constitution || []), article].slice(-20);
+      this.store.db.prepare('DELETE FROM constitution_articles WHERE id<=?').run(article.id - 200);
+      this.commit(next);
+      this.scheduleProposal();
+    });
+    this.publish();
+  }
+  councilTick() {
+    if (!this.councilEnabled || this.closed || this.store.get('paused') === 'true') return;
+    this.finishCouncil();
+  }
+  queueCouncilRound() {
+    const motion = this.world.council;
+    if (
+      motion?.status === 'open' &&
+      this.now() < motion.closesAt &&
+      motion.residents.length < IDS.length &&
+      this.store.get('council_ballot_attempt') !== motion.id
+    )
+      this.pendingCouncilRound = motion.id;
+  }
+  councilRoundDue() {
+    const motion = this.world.council;
+    return (
+      this.councilEnabled &&
+      motion?.status === 'open' &&
+      this.now() < motion.closesAt &&
+      this.pendingCouncilRound === motion.id &&
+      motion.residents.length < IDS.length &&
+      this.store.get('council_ballot_attempt') !== motion.id &&
+      [...this.listeners].some((l) => l.online && this.now() - l.lastActive < 600000)
+    );
+  }
+  scheduleProposal() {
+    const delay = COUNCIL_BREAK + this.draw(AI_PROPOSAL_MAX_DELAY - COUNCIL_BREAK + 1);
+    this.store.set('next_council_proposal_at', this.now() + delay);
+    this.store.set('council_proposal_generation', randomUUID());
+  }
+  proposalCandidates() {
+    const rows = this.store.db
+      .prepare('SELECT agent_id FROM council_ai_proposals WHERE created>?')
+      .all(this.now() - hour);
+    return rows.length >= 2 ? [] : IDS.filter((id) => !rows.some((row) => row.agent_id === id));
+  }
+  inviteProposal(task) {
+    if (
+      !this.councilEnabled ||
+      task.kind !== 'automatic' ||
+      task.action.type !== 'round' ||
+      this.world.council?.status === 'open' ||
+      this.store.get('paused') === 'true' ||
+      this.now() < Number(this.store.get('next_council_proposal_at')) ||
+      ![...this.listeners].some((l) => l.visible && this.now() - l.lastActive < 600000)
+    )
+      return;
+    // Persist before the model request: declines, errors and restarts cannot trigger rapid retries.
+    this.scheduleProposal();
+    const candidates = this.proposalCandidates();
+    if (!candidates.length) return;
+    return {
+      agentId: candidates[this.draw(candidates.length)],
+      generation: this.store.get('council_proposal_generation'),
+    };
+  }
+  acceptResidentProposal(round, invitation) {
+    const candidate = round.councilProposal;
+    if (
+      !invitation ||
+      !candidate ||
+      candidate.agentId !== invitation.agentId ||
+      invitation.generation !== this.store.get('council_proposal_generation') ||
+      this.world.council?.status === 'open' ||
+      !this.proposalCandidates().includes(candidate.agentId)
+    )
+      return;
+    const now = this.now(),
+      id = randomUUID();
+    if (proposalError(this.world, candidate.proposal, id, now)) return;
+    const next = openCouncil(this.world, candidate.proposal.topic, id, now, candidate.proposal);
+    next.council.proposer = candidate.agentId;
+    next.council.residents.push({
+      agentId: candidate.agentId,
+      choice: 'yes',
+      opinion: candidate.reason,
+    });
+    this.commit(next);
+    this.queueCouncilRound();
+    this.store.db.exec('DELETE FROM council_votes; DELETE FROM council_attendees');
+    this.store.db.prepare('DELETE FROM council_ai_proposals WHERE created<=?').run(now - day);
+    this.store.db
+      .prepare('INSERT INTO council_ai_proposals VALUES (?, ?, ?)')
+      .run(id, candidate.agentId, now);
+    for (const listener of this.listeners)
+      if (listener.online && now - listener.lastActive < 600000)
+        this.attendCouncil(listener.identity);
+  }
+  vote(identity, body) {
+    const parsed = z
+      .object({ motionId: z.string().uuid(), choice: VoteChoiceSchema })
+      .strict()
+      .safeParse(body);
+    if (!parsed.success) throw new HttpError(400, '请选择赞成或反对。');
+    if (this.store.get('paused') === 'true') throw new HttpError(503, '小镇暂时休息，请稍后再来。');
+    this.councilTick();
+    const motion = this.world.council;
+    if (
+      !motion ||
+      motion.id !== parsed.data.motionId ||
+      motion.status !== 'open' ||
+      this.now() >= motion.closesAt
+    )
+      throw new HttpError(409, '这场投票已结束，请查看最新议题。');
+    const previous = this.store.db
+      .prepare('SELECT choice, updated FROM council_votes WHERE motion_id=? AND owner=?')
+      .get(motion.id, identity.owner);
+    if (previous?.choice === parsed.data.choice) return { choice: previous.choice };
+    if (previous && this.now() - previous.updated < 1000)
+      throw new HttpError(429, '改票太快，请稍后再试。');
+    const ipCount = this.store.db
+      .prepare('SELECT count(*) AS n FROM council_votes WHERE motion_id=? AND ip=?')
+      .get(motion.id, identity.ip).n;
+    if (!previous && ipCount >= 30) throw new HttpError(429, '当前网络参与较频繁，请稍后再来。');
+    this.transaction(() => {
+      this.attendCouncil(identity);
+      this.store.db
+        .prepare(
+          'INSERT INTO council_votes VALUES (?, ?, ?, ?, ?) ON CONFLICT(motion_id, owner) DO UPDATE SET choice=excluded.choice, updated=excluded.updated',
+        )
+        .run(motion.id, identity.owner, identity.ip, parsed.data.choice, this.now());
+      const next = structuredClone(this.world);
+      if (previous) next.council[previous.choice === 'yes' ? 'visitorYes' : 'visitorNo']--;
+      next.council[parsed.data.choice === 'yes' ? 'visitorYes' : 'visitorNo']++;
+      this.commit(next);
+    });
+    this.publish();
+    return { choice: parsed.data.choice };
+  }
+  propose(identity, body) {
+    const parsed = CouncilProposalSchema.safeParse(body);
+    if (!parsed.success) throw new HttpError(400, '条款内容需为 1–300 字。');
+    if (this.store.get('paused') === 'true') throw new HttpError(503, '小镇暂时休息，请稍后再来。');
+    this.finishCouncil();
+    if (this.world.council?.status === 'open')
+      throw new HttpError(409, '当前议题仍在投票，请结束后再提交。');
+    const proposal = parsed.data;
+    const now = this.now(),
+      id = randomUUID();
+    const error = proposalError(this.world, proposal, id, now);
+    if (error) throw new HttpError(409, error);
+    const latest = this.store.db
+      .prepare('SELECT max(created) AS created FROM council_proposals WHERE owner=?')
+      .get(identity.owner).created;
+    if (latest !== null && now - latest < 60000)
+      throw new HttpError(429, '请间隔一分钟再提交议题。');
+    const count = this.store.db
+      .prepare('SELECT count(*) AS n FROM council_proposals WHERE ip=? AND created>?')
+      .get(identity.ip, now - hour).n;
+    if (count >= 10) throw new HttpError(429, '当前网络提议较频繁，请稍后再来。');
+    this.transaction(() => {
+      this.scheduleProposal();
+      this.commit(openCouncil(this.world, proposal.topic, id, now, proposal));
+      this.queueCouncilRound();
+      this.store.db.exec('DELETE FROM council_votes; DELETE FROM council_attendees');
+      this.store.db.prepare('DELETE FROM council_proposals WHERE created<?').run(now - hour);
+      this.store.db
+        .prepare('INSERT INTO council_proposals VALUES (?, ?, ?)')
+        .run(identity.owner, identity.ip, now);
+      for (const listener of this.listeners)
+        if (listener.online && now - listener.lastActive < 600000)
+          this.attendCouncil(listener.identity);
+      this.attendCouncil(identity);
+    });
+    this.publish();
+    queueMicrotask(() => this.tick());
+    return { motionId: id };
   }
   publish() {
     for (const listener of this.listeners) listener.send(this.snapshot(listener.identity));
@@ -190,7 +472,14 @@ export class SharedTown {
       [...this.listeners].filter((l) => l.identity.ip === identity.ip).length >= 8
     )
       throw new HttpError(429, '在线连接过多，请关闭重复页面后重试。');
-    const listener = { identity, send, connection, visible: false, lastActive: this.now() };
+    const listener = {
+      identity,
+      send,
+      connection,
+      visible: false,
+      online: false,
+      lastActive: this.now(),
+    };
     this.listeners.add(listener);
     this.publish();
     queueMicrotask(() => this.tick());
@@ -199,11 +488,13 @@ export class SharedTown {
       if (!this.closed) this.publish();
     };
   }
-  presence(identity, visible, connection = 'default') {
+  presence(identity, visible, connection = 'default', online = visible) {
     for (const l of this.listeners)
       if (l.identity.owner === identity.owner && l.connection === connection) {
         l.visible = visible;
+        l.online = online;
         l.lastActive = this.now();
+        if (online) this.attendCouncil(identity);
       }
   }
   accept(identity, body) {
@@ -218,6 +509,8 @@ export class SharedTown {
         throw new HttpError(409, '此请求编号已用于另一项操作。');
       return { id: existing.id, state: existing.status };
     }
+    if (action.type === 'round' && !this.autoError)
+      throw new HttpError(409, '当前没有需要重试的思考回合。');
     if (!this.configured()) throw new HttpError(503, '小镇暂时无法互动，请稍后再来。');
     if (this.store.get('paused') === 'true') throw new HttpError(503, '小镇暂时休息，请稍后再来。');
     const budget = this.budget();
@@ -262,13 +555,17 @@ export class SharedTown {
           ).lastInsertRowid,
       );
     });
-    if (this.active?.kind === 'automatic') {
+    const voting =
+      this.active?.councilMotionId === this.world.council?.id &&
+      this.world.council?.status === 'open' &&
+      this.now() < this.world.council.closesAt;
+    if (this.active?.kind === 'automatic' && !voting) {
       this.controller.abort();
       this.active = null;
     }
-    this.autoError = '';
+    this.setAutoError('');
     this.publish();
-    this.pump();
+    this.tick();
     return { id, state: 'pending' };
   }
   cancel(identity, id) {
@@ -311,8 +608,10 @@ export class SharedTown {
   }
   tick() {
     if (this.closed) return;
+    this.councilTick();
     if (this.now() - this.lastMaintenance > hour) {
       this.lastMaintenance = this.now();
+      this.store.db.prepare('DELETE FROM model_failures WHERE created<?').run(this.now() - 7 * day);
       // Seven days of detailed audit records; lifetime usage totals are retained separately.
       this.store.db
         .prepare(
@@ -320,26 +619,27 @@ export class SharedTown {
         )
         .run(this.now() - 7 * day);
     }
-    this.pump();
+    const councilRound = this.councilRoundDue();
+    if (!councilRound) this.pump();
     if (
       this.active ||
       !this.configured() ||
       this.store.get('paused') === 'true' ||
-      this.autoError ||
+      (this.autoError && !councilRound) ||
       this.budget().resetsAt > this.now()
     )
       return;
     const watching = [...this.listeners].some(
       (l) => l.visible && this.now() - l.lastActive < 600000,
     );
-    if (watching && this.now() >= this.nextTurn)
+    if (councilRound || (watching && this.now() >= this.nextTurn))
       this.start({ id: 0, kind: 'automatic', action: { type: 'round' } });
   }
   async start(task) {
     this.active = task;
     const controller = new AbortController();
     this.controller = controller;
-    let callId;
+    let callId, resultUsage;
     try {
       this.transaction(() => {
         const action = task.action;
@@ -376,27 +676,56 @@ export class SharedTown {
       if (task.action.type !== 'join') {
         const world = this.world,
           action = task.action;
+        const proposalInvitation = this.inviteProposal(task);
+        if (action.type !== 'chat' && world.council?.status === 'open') {
+          task.councilMotionId = world.council.id;
+          this.store.set('council_ballot_attempt', world.council.id);
+          this.pendingCouncilRound = undefined;
+        }
         const result = await this.model(
           this.config,
           {
             world,
             round: action.type !== 'chat',
+            ...(proposalInvitation ? { proposalInvitation } : {}),
             ...(action.type === 'chat' ? { agentId: action.agentId, prompt: action.text } : {}),
           },
           controller.signal,
         );
         if (controller.signal.aborted || this.closed || this.active !== task) return;
-        const next =
+        resultUsage = result.usage;
+        this.finishCouncil();
+        if (JSON.stringify(world.laws || []) !== JSON.stringify(this.world.laws || [])) {
+          this.store.db
+            .prepare('UPDATE calls SET input=?, output=? WHERE id=?')
+            .run(
+              Math.max(0, Number(result.usage?.input) || 0),
+              Math.max(0, Number(result.usage?.output) || 0),
+              callId,
+            );
+          if (task.kind === 'human') throw new HttpError(409, '宪法已更新，请重试本次对话。');
+          return;
+        }
+        let next =
           action.type === 'chat'
             ? applyChatReply(
-                world,
+                this.world,
                 action.agentId,
                 DecisionSchema.parse(result.decision),
                 action.messageId,
               )
-            : applyRound(world, RoundSchema.parse(result.round));
+            : applyRound(this.world, RoundSchema.parse(result.round));
+        if (action.type !== 'chat')
+          next = recordCouncilOpinions(
+            next,
+            RoundSchema.parse(result.round),
+            world.council?.id,
+            this.now(),
+          );
         this.transaction(() => {
           this.commit(next);
+          if (action.type !== 'chat')
+            this.acceptResidentProposal(RoundSchema.parse(result.round), proposalInvitation);
           this.store.db
             .prepare('UPDATE calls SET input=?, output=? WHERE id=?')
             .run(
@@ -407,23 +736,51 @@ export class SharedTown {
           if (task.kind === 'human')
             this.store.db.prepare("UPDATE commands SET status='completed' WHERE id=?").run(task.id);
         });
+        this.setAutoError('');
+        this.finishCouncil();
       } else
         this.store.db.prepare("UPDATE commands SET status='completed' WHERE id=?").run(task.id);
     } catch (e) {
       if (controller.signal.aborted || this.closed || this.active !== task) return;
+      if (callId) {
+        const diagnostic =
+          e instanceof ModelError
+            ? e.diagnostic
+            : {
+                code:
+                  e?.name === 'ZodError'
+                    ? 'world_validation'
+                    : e instanceof HttpError
+                      ? 'application_http'
+                      : 'internal',
+                ...(e?.name === 'ZodError' ? { issues: validationDetails(e.issues) } : {}),
+              };
+        this.store.db
+          .prepare('INSERT OR REPLACE INTO model_failures VALUES (?, ?, ?, ?)')
+          .run(callId, this.now(), task.kind, JSON.stringify(diagnostic));
+        const usage = e instanceof ModelError ? e.usage : resultUsage;
+        if (usage)
+          this.store.db
+            .prepare('UPDATE calls SET input=?,output=? WHERE id=?')
+            .run(
+              Number.isFinite(Number(usage.input)) ? Math.max(0, Number(usage.input)) : 0,
+              Number.isFinite(Number(usage.output)) ? Math.max(0, Number(usage.output)) : 0,
+              callId,
+            );
+      }
       // Never expose provider response bodies, SQL diagnostics, or server credentials.
       const error = e instanceof HttpError ? e.message : '暂时无法回应，请重试。';
       if (task.kind === 'human')
         this.store.db
           .prepare("UPDATE commands SET status='failed', error=? WHERE id=?")
           .run(error, task.id);
-      else this.autoError = error;
+      else this.setAutoError(error);
     } finally {
       if (this.active === task && !this.closed) {
         this.active = null;
         this.nextTurn = this.now() + this.limits.interval;
         this.publish();
-        queueMicrotask(() => this.pump());
+        queueMicrotask(() => this.tick());
       }
     }
   }
@@ -432,7 +789,7 @@ export class SharedTown {
       throw new HttpError(403, '需要管理员凭据。');
     if (action === 'pause' || action === 'resume') {
       this.store.set('paused', action === 'pause' ? 'true' : 'false');
-      if (action === 'resume') this.autoError = '';
+      if (action === 'resume') this.setAutoError('');
     } else if (action === 'reset' || action === 'import') {
       const next = action === 'reset' ? createWorld() : importReplay(replay).at(-1);
       this.controller?.abort();
@@ -441,13 +798,21 @@ export class SharedTown {
         this.store.db.exec(
           "UPDATE commands SET status='cancelled' WHERE status IN ('pending','running','failed')",
         );
+        this.store.db.exec('DELETE FROM council_votes');
+        this.store.db.exec('DELETE FROM council_attendees');
+        this.store.db.exec('DELETE FROM constitution_articles');
+        for (const article of next.constitution || [])
+          this.store.db
+            .prepare('INSERT INTO constitution_articles(id,motion_id,article) VALUES (?, ?, ?)')
+            .run(article.id, article.motionId, JSON.stringify(article));
         this.commit(next);
         this.store.set('paused', 'true');
+        this.scheduleProposal();
       });
-      this.autoError = '';
+      this.setAutoError('');
     } else throw new HttpError(400, '管理操作不正确。');
     this.publish();
-    this.pump();
+    this.tick();
   }
   close() {
     this.closed = true;

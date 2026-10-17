@@ -17,6 +17,7 @@ test.beforeEach(async () => {
   town = new SharedTown({
     path: ':memory:',
     config,
+    council: false,
     limits: { cooldown: 1, interval: 3600000, callsMinute: 100 },
     model: async (_config: object, body: { prompt?: string }) => {
       if (hold) return new Promise((resolve) => pending.push({ resolve, body }));
@@ -255,4 +256,23 @@ test('quota errors preserve drafts and delayed acknowledgements do not erase new
   await expect(page.getByRole('dialog')).not.toContainText(/Cookie|SQLite|LLM_|API|服务器/);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('textbox')).toHaveValue('成功回执前写好的下一条');
+});
+
+test('a failed automatic round can be retried from its error banner while personally paused, without injecting an event', async ({
+  browser,
+}) => {
+  const page = await open(browser, true);
+  await page.getByRole('button', { name: '暂停观察', exact: true }).click();
+  town.autoError = '回应格式有误，请重试。';
+  town.publish();
+  const alert = page.getByRole('alert');
+  await expect(alert).toContainText('回应格式有误，请重试。');
+  await alert.getByRole('button', { name: '重试', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByLabel('共享小镇状态')).toContainText('全站今日模型 1/5000 次');
+  expect(town.world.tick).toBe(1);
+  expect(town.world.effects).toEqual([]);
+  expect(town.world.human).toBe(false);
+  await expect(page.getByRole('button', { name: '开始观察', exact: true })).toBeVisible();
 });

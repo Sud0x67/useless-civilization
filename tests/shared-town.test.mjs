@@ -24,6 +24,7 @@ function setup(options = {}) {
     path: ':memory:',
     config,
     clock: false,
+    council: false,
     model: async () => ({ decision, round, usage: { input: 10, output: 20 } }),
     ...options,
   });
@@ -135,7 +136,7 @@ describe('shared authoritative town', () => {
       town.accept(identity, { ...body, action: { ...body.action, text: '改写' } }),
     ).toThrow('另一项操作');
     expect(() => town.accept(bob, { ...chat(), world: {} })).toThrow('格式');
-    expect(() => town.accept(bob, action({ type: 'round' }))).toThrow('格式');
+    expect(() => town.accept(bob, action({ type: 'round' }))).toThrow('需要重试');
   });
   it('enforces signed anonymous cookies, IP limits, cooldown, personal and global caps', async () => {
     let time = Date.UTC(2026, 9, 16, 1);

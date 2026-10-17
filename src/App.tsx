@@ -13,6 +13,9 @@ import { Conversation } from './components/Conversation';
 import { ActivityFeed } from './components/ActivityFeed';
 import { WorldReplay } from './components/WorldReplay';
 import { MapDialogue } from './components/MapDialogue';
+import { TownCouncil } from './components/TownCouncil';
+import { TownConstitution } from './components/TownConstitution';
+import { COUNCIL_DURATION, councilDescription } from './world/council';
 import { useSharedTown } from './hooks/useSharedTown';
 import type { TownAction } from './shared/town';
 import { RequestScheduler, type ScheduledTask } from './world/request-scheduler';
@@ -36,7 +39,7 @@ import {
 } from './world/engine';
 
 type Status = { configured: boolean; model: string | null; wireApi: string; shared?: boolean };
-type Modal = 'events' | 'settings' | 'reset' | null;
+type Modal = 'events' | 'settings' | 'reset' | 'council' | 'constitution' | null;
 type ModelAction = TownAction;
 const intervals = { '20s': 20000, '12s': 12000, '8s': 8000 };
 function Avatar({ agent, small = false }: { agent: Agent; small?: boolean }) {
@@ -186,6 +189,32 @@ export function App() {
         (sharedData?.limits.perVisitorPending || 2)
     : humanTasks.length >= scheduler.limit;
   const [modal, setModal] = useState<Modal>(null);
+  const councilNotices = useRef({ open: '', result: '', observed: '' });
+  useEffect(() => {
+    const motion = sharedData?.world.council;
+    if (!motion || !shared.connected || !visible || replay !== null) return;
+    const seen = councilNotices.current;
+    if (motion.status === 'open') seen.observed = motion.id;
+    if (modal !== null && modal !== 'council') return;
+    if (motion.status === 'open' && seen.open !== motion.id) {
+      seen.open = motion.id;
+      if (modal === null) setModal('council');
+    } else if (
+      motion.status === 'closed' &&
+      seen.observed === motion.id &&
+      seen.result !== motion.id
+    ) {
+      seen.result = motion.id;
+      setModal('council');
+    }
+  }, [
+    sharedData?.world.council?.id,
+    sharedData?.world.council?.status,
+    shared.connected,
+    visible,
+    replay,
+    modal,
+  ]);
   const [night, setNight] = useState(true);
   const [notice, setNotice] = useState('');
   const [sound, setSound] = useState(false);
@@ -471,6 +500,7 @@ export function App() {
   const agent = view.agents.find((a) => a.id === selected) || null;
   const replayLines = replay === null ? [] : frameDialogues(view, snapshots[replay - 1], selected);
   const replayLine = replayLines[replayDialogue];
+  const civicWorld = replay === null ? sharedData?.world || view : view;
   const interactionLocked =
     replay !== null ||
     !status?.configured ||
@@ -617,10 +647,21 @@ export function App() {
           </span>
         </div>
         <div className="top-actions">
-          <span className="model-badge">
+          {sharedMode && (
+            <button className="constitution-entry" onClick={() => setModal('constitution')}>
+              <Icon name="book" size={15} />
+              宪法
+            </button>
+          )}
+          <button
+            className="model-badge"
+            aria-label="AI 居民"
+            aria-haspopup="dialog"
+            onClick={() => setModal('settings')}
+          >
             <Icon name="spark" size={13} />
             <span>AI 居民</span>
-          </span>
+          </button>
           <ToolButton label="世界设置" icon="settings" onClick={() => setModal('settings')} />
         </div>
       </header>
@@ -882,6 +923,28 @@ export function App() {
               )}
             </div>
           )}
+          {sharedMode && (
+            <button className="council-launcher" onClick={() => setModal('council')}>
+              <Icon name="people" size={18} />
+              <span>
+                <strong>
+                  小镇议会 ·{' '}
+                  {civicWorld.council?.status === 'open'
+                    ? '投票中'
+                    : civicWorld.council
+                      ? '已结算'
+                      : '等待开题'}
+                </strong>
+                <small>
+                  {civicWorld.council
+                    ? councilDescription(civicWorld.council).title
+                    : '一起决定小镇接下来会发生什么。'}
+                </small>
+              </span>
+              <span>{civicWorld.council?.status === 'open' ? '参与投票' : '查看议会'}</span>
+              <Icon name="arrow" size={14} />
+            </button>
+          )}
           {humanPending && (
             <section className="interaction-queue" aria-label="人类操作队列">
               <div className="queue-heading" role="status">
@@ -950,6 +1013,7 @@ export function App() {
                     if (schedule.failed)
                       void shared.command({ type: 'retry', id: schedule.failed.id });
                     else if (shared.error) shared.clearError();
+                    else if (sharedData?.autoError) void shared.command({ type: 'round' });
                     else setModal('events');
                     return;
                   }
@@ -961,9 +1025,7 @@ export function App() {
                   ? '了解小镇'
                   : sharedMode && shared.error && !schedule.failed
                     ? '知道了'
-                    : sharedMode && sharedData?.autoError && !schedule.failed
-                      ? '发起互动'
-                      : '重试'}
+                    : '重试'}
                 <Icon name="refresh" size={13} />
               </button>
               {schedule.failed?.kind === 'human' && (
@@ -1226,6 +1288,56 @@ export function App() {
         aria-label="导入回放文件"
         onChange={(e) => void upload(e.target.files?.[0])}
       />
+      {modal === 'council' && sharedData && (
+        <ModalShell
+          title={civicWorld.council?.status === 'closed' ? '议会结果' : '小镇议会投票'}
+          subtitle={
+            replay !== null
+              ? '正在查看历史议会。'
+              : civicWorld.council?.status === 'closed'
+                ? '这一场投票，大家做出了共同决定。'
+                : `每人一票，${(civicWorld.council ? civicWorld.council.closesAt - civicWorld.council.openedAt : COUNCIL_DURATION) / 1000} 秒后揭晓。`
+          }
+          onClose={() => setModal(null)}
+        >
+          <TownCouncil
+            world={civicWorld}
+            yourVote={replay === null ? sharedData.councilVote : null}
+            serverTime={sharedData.serverTime}
+            connected={shared.connected && sharedData.running}
+            readOnly={replay !== null}
+            replaying={replay !== null}
+            voting={shared.voting}
+            error={shared.voteError}
+            onVote={shared.vote}
+          />
+          <div className="civic-dialog-actions">
+            <button onClick={() => setModal('constitution')}>查看小镇宪法</button>
+            <button onClick={() => setModal(null)}>
+              {civicWorld.council?.status === 'closed' ? '知道了' : '稍后再看'}
+            </button>
+          </div>
+        </ModalShell>
+      )}
+      {modal === 'constitution' && sharedData && (
+        <ModalShell
+          title="小镇宪法"
+          subtitle="共同制定，也能共同修改。"
+          onClose={() => setModal(null)}
+        >
+          <TownConstitution
+            key={replay === null ? 'live' : `replay-${replay}`}
+            world={civicWorld}
+            readOnly={replay !== null}
+            connected={shared.connected && sharedData.running}
+            proposing={shared.proposing}
+            error={shared.proposalError}
+            onPropose={async (proposal) => {
+              if (await shared.propose(proposal)) setModal('council');
+            }}
+          />
+        </ModalShell>
+      )}
       {modal === 'events' && (
         <ModalShell
           title="给小镇一点意外。"

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SharedState, TownAction } from '../shared/town';
+import type { CouncilProposal, VoteChoice } from '../shared/schema';
 export function useSharedTown(enabled: boolean, watching: boolean) {
   const [data, setData] = useState<SharedState | null>(null);
   const [connected, setConnected] = useState(false);
@@ -7,6 +8,12 @@ export function useSharedTown(enabled: boolean, watching: boolean) {
   const [sending, setSending] = useState(false);
   const pending = useRef<{ body: string; id: string } | null>(null);
   const busy = useRef(false);
+  const voteBusy = useRef(false);
+  const [voting, setVoting] = useState(false);
+  const [voteError, setVoteError] = useState('');
+  const proposalBusy = useRef(false);
+  const [proposing, setProposing] = useState(false);
+  const [proposalError, setProposalError] = useState('');
   const [connection] = useState(() => crypto.randomUUID());
   useEffect(() => {
     if (!enabled) return;
@@ -28,7 +35,11 @@ export function useSharedTown(enabled: boolean, watching: boolean) {
       void fetch('/api/presence', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ visible: watching && !document.hidden, connection }),
+        body: JSON.stringify({
+          visible: watching && !document.hidden,
+          online: !document.hidden,
+          connection,
+        }),
       }).catch(() => {});
     };
     update();
@@ -87,5 +98,74 @@ export function useSharedTown(enabled: boolean, watching: boolean) {
       setError(e instanceof Error ? e.message : '取消失败');
     }
   }
-  return { data, connected, error, sending, command, cancel, clearError: () => setError('') };
+  async function vote(motionId: string, choice: VoteChoice) {
+    if (voteBusy.current) return;
+    voteBusy.current = true;
+    setVoting(true);
+    setVoteError('');
+    try {
+      const response = await fetch('/api/council/vote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ motionId, choice }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || '投票失败，请重试。');
+    } catch (error) {
+      setVoteError(
+        error instanceof TypeError || error instanceof SyntaxError
+          ? '连接中断，请重试。'
+          : error instanceof Error
+            ? error.message
+            : '投票失败，请重试。',
+      );
+    } finally {
+      voteBusy.current = false;
+      setVoting(false);
+    }
+  }
+  useEffect(() => setVoteError(''), [data?.world.council?.id]);
+  async function propose(proposal: CouncilProposal) {
+    if (proposalBusy.current) return false;
+    proposalBusy.current = true;
+    setProposing(true);
+    setProposalError('');
+    try {
+      const response = await fetch('/api/council/propose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(proposal),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || '提议未提交，请重试。');
+      return true;
+    } catch (error) {
+      setProposalError(
+        error instanceof TypeError || error instanceof SyntaxError
+          ? '连接中断，请重试。'
+          : error instanceof Error
+            ? error.message
+            : '提议未提交，请重试。',
+      );
+      return false;
+    } finally {
+      proposalBusy.current = false;
+      setProposing(false);
+    }
+  }
+  return {
+    data,
+    connected,
+    error,
+    sending,
+    command,
+    cancel,
+    vote,
+    voting,
+    voteError,
+    propose,
+    proposing,
+    proposalError,
+    clearError: () => setError(''),
+  };
 }

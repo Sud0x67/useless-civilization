@@ -233,7 +233,11 @@ export function stepWorld(input: World): World {
   w.chaos = clamp(w.chaos - 1);
   return w;
 }
-export function applyEvent(input: World, id: EventId): World {
+export function applyEvent(
+  input: World,
+  id: EventId,
+  origin: 'human' | 'council' = 'human',
+): World {
   const event = events.find((e) => e.id === id);
   if (!event) return input;
   const w = copy(input);
@@ -251,7 +255,13 @@ export function applyEvent(input: World, id: EventId): World {
     [a.memories, b.memories] = [b.memories, a.memories];
     remember(a, `与${b.name}交换了最近的记忆。`);
     remember(b, `与${a.name}交换了最近的记忆。`);
-    addFeed(w, `${a.name}和${b.name}交换了记忆。等待他们决定如何回应。`, null, 'event', 'human');
+    addFeed(
+      w,
+      `${a.name}和${b.name}交换了记忆。等待他们决定如何回应。`,
+      null,
+      'event',
+      origin === 'council' ? 'local' : 'human',
+    );
     w.chaos = clamp(w.chaos + 9);
   }
   if (id === 'bread') {
@@ -261,7 +271,13 @@ export function applyEvent(input: World, id: EventId): World {
       a.happiness = clamp(a.happiness + 12);
     }
   }
-  addFeed(w, `你投放了「${event.title}」。${event.description}`, null, 'event', 'human');
+  addFeed(
+    w,
+    `${origin === 'council' ? '议会通过了' : '你投放了'}「${event.title}」。${event.description}`,
+    null,
+    'event',
+    origin === 'council' ? 'local' : 'human',
+  );
   return w;
 }
 export function applyDecision(input: World, id: AgentId, proposal: Decision): World {
@@ -288,7 +304,7 @@ export function applyRound(input: World, data: Round): World {
       addFeed(w, '镇公所暂停会议，相关提案未执行，等待下一轮新计划。', plan.agentId, 'system');
       continue;
     }
-    const { agentId, target: _target, intent: _intent, ...decision } = plan;
+    const { agentId, target: _target, intent: _intent, councilVote: _vote, ...decision } = plan;
     w = applyDecision(w, agentId, decision);
     const a = w.agents.find((x) => x.id === plan.agentId)!;
     if (plan.action === 'rest') {
@@ -395,13 +411,19 @@ export function formatDay(minute: number) {
   return Math.floor(minute / 1440) + 1;
 }
 export function exportReplay(snapshots: World[]) {
-  const frames = snapshots.slice(-120);
-  let raw = JSON.stringify({ version: 1, snapshots: frames });
-  while (frames.length > 1 && new TextEncoder().encode(raw).length > 5_000_000) {
-    frames.shift();
-    raw = JSON.stringify({ version: 1, snapshots: frames });
+  const frames = snapshots.slice(-120).map((world) => JSON.stringify(world));
+  const encoder = new TextEncoder();
+  const sizes = frames.map((frame) => encoder.encode(frame).length);
+  let size =
+    encoder.encode('{"version":1,"snapshots":[]}').length +
+    sizes.reduce((sum, value) => sum + value, 0) +
+    Math.max(0, frames.length - 1);
+  let start = 0;
+  while (frames.length - start > 1 && size > 5_000_000) {
+    size -= sizes[start] + 1;
+    start++;
   }
-  return raw;
+  return '{"version":1,"snapshots":[' + frames.slice(start).join(',') + ']}';
 }
 export function importReplay(raw: string): World[] {
   if (new TextEncoder().encode(raw).length > 5_000_000) throw new Error('回放文件不能超过 5 MB。');
