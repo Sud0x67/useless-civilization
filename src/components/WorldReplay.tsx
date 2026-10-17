@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import type { FeedItem, World } from '../shared/schema';
 import { formatDay, formatTime } from '../world/engine';
 import { dialogueDuration } from '../world/live-dialogue';
@@ -39,7 +39,8 @@ export function WorldReplay({
   const duration = dialogue ? dialogueDuration(dialogue.text) : 1000;
   const dialogueId = dialogue?.id;
 
-  useEffect(() => {
+  // Arm the next line before paint, so its visible text and clock start agree.
+  useLayoutEffect(() => {
     if (!playing || position === null || !visible) return;
     const timer = window.setTimeout(() => {
       if (dialogueIndex + 1 < dialogueCount) {
