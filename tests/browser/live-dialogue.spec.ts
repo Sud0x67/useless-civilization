@@ -23,16 +23,16 @@ test('live observation rotates new dialogue, holds on pause and prioritizes resi
   await page.getByRole('button', { name: '开始观察', exact: true }).click();
   await expect(page.locator('.clock')).toContainText('08:15');
   await expect(bubble).toContainText(round.decisions[0].speech);
-  await page.clock.runFor(3000);
+  await page.clock.fastForward(3000);
   await expect(bubble).toContainText(round.decisions[1].speech);
   await page.getByRole('button', { name: '暂停观察', exact: true }).click();
-  await page.clock.runFor(10000);
+  await page.clock.fastForward(10000);
   await expect(bubble).toContainText(round.decisions[1].speech);
   await page.getByRole('button', { name: '选择居民回声', exact: true }).click();
   await expect(bubble).toContainText(round.decisions[4].speech);
   await page.getByRole('textbox').fill('取消选择后也要保留的草稿');
   await page.getByRole('button', { name: '开始观察', exact: true }).click();
-  await page.clock.runFor(3000);
+  await page.clock.fastForward(3000);
   await expect(bubble).toContainText(round.decisions[2].speech);
   // Either surface toggles the same selection, and deselection resumes the queue.
   await page.getByRole('button', { name: '查看回声', exact: true }).click();
@@ -57,7 +57,7 @@ test('live observation rotates new dialogue, holds on pause and prioritizes resi
   await slider.focus();
   await slider.press('Home');
   await expect(bubble).toHaveCount(0);
-  await page.clock.runFor(15000);
+  await page.clock.fastForward(15000);
   await expect(bubble).toHaveCount(0);
   expect(calls).toBe(2);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
@@ -80,7 +80,7 @@ test('a completed round clears after its last utterance without extra model requ
   const bubble = page.getByLabel('地图对白');
   for (const line of round.decisions) {
     await expect(bubble).toContainText(line.speech);
-    await page.clock.runFor(3000);
+    await page.clock.fastForward(3000);
   }
   await expect(bubble).toHaveCount(0);
   expect(calls).toBe(1);

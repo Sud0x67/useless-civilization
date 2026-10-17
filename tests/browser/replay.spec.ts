@@ -53,16 +53,20 @@ test('replay supports seeking, single frames, all speeds and stops at the end wi
     await slider.press('Home');
     await rate.selectOption(String(speed));
     await page.getByRole('button', { name: '播放回放', exact: true }).click();
-    await page.clock.runFor(duration - 1);
+    await page.clock.fastForward(duration - 1);
     await expect(slider).toHaveValue('0');
-    await page.clock.runFor(1);
+    await page.clock.fastForward(1);
     await expect(slider).toHaveValue('1');
     await page.getByRole('button', { name: '暂停回放', exact: true }).click();
-    await page.clock.runFor(duration * 2);
+    await page.clock.fastForward(duration * 2);
     await expect(slider).toHaveValue('1');
   }
   await page.getByRole('button', { name: '播放回放', exact: true }).click();
-  await page.clock.runFor(1000);
+  // Advance one recorded frame at a time; skip unrelated Three.js animation frames.
+  for (let index = 2; index <= 5; index++) {
+    await page.clock.fastForward(250);
+    await expect(slider).toHaveValue(String(index));
+  }
   await expect(progress).toContainText('09:15 · 6/6');
   await expect(page.getByRole('button', { name: '播放回放', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '下一帧', exact: true })).toBeDisabled();
@@ -72,12 +76,12 @@ test('replay supports seeking, single frames, all speeds and stops at the end wi
   await expect(slider).toHaveValue('0');
   // A manual seek pauses playback, including while the timer is running.
   await slider.press('End');
-  await page.clock.runFor(2000);
+  await page.clock.fastForward(2000);
   await expect(slider).toHaveValue('5');
   await expect(page.getByRole('button', { name: '播放回放', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '返回当前世界', exact: true }).click();
   await expect(page.locator('.live-pill')).toHaveText('LIVE');
-  await page.clock.runFor(10000);
+  await page.clock.fastForward(10000);
   expect(calls()).toBe(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
@@ -109,7 +113,7 @@ test('map dialogue appears automatically during replay and distinguishes human i
   await expect(bubble).toHaveCount(0);
   await page.getByRole('combobox', { name: '回放倍速' }).selectOption('1');
   await page.getByRole('button', { name: '播放回放', exact: true }).click();
-  await page.clock.runFor(1000);
+  await page.clock.fastForward(1000);
   await expect(bubble).toBeVisible();
   await expect(bubble).toContainText(round.decisions.at(-1)!.speech);
   await page.getByRole('button', { name: '暂停回放', exact: true }).click();
