@@ -63,4 +63,34 @@ describe('live map dialogue', () => {
     expect(dialogueDuration('短句')).toBe(3000);
     expect(dialogueDuration('长'.repeat(180))).toBe(6000);
   });
+  it('clears Soren priority on deselection and keeps later shared rounds in order', () => {
+    const first = applyRound(createWorld(), round);
+    let state = liveDialogue(emptyDialogue, {
+      type: 'observe',
+      world: first,
+      selected: null,
+      focus: 0,
+    });
+    state = liveDialogue(state, { type: 'observe', world: first, selected: 'soren', focus: 1 });
+    expect(state.current?.actor).toBe('soren');
+    state = liveDialogue(state, { type: 'observe', world: first, selected: null, focus: 2 });
+    expect(state.current?.actor).toBe('otto');
+    const second = applyRound(first, round);
+    state = liveDialogue(state, { type: 'observe', world: second, selected: null, focus: 2 });
+    const speakers = [];
+    while (state.current) {
+      speakers.push(state.current.actor);
+      state = liveDialogue(state, { type: 'next', id: state.current.id });
+    }
+    expect(speakers).toEqual([
+      'otto',
+      'lin',
+      'ada',
+      'echo',
+      ...round.decisions.map((line) => line.agentId),
+    ]);
+    expect(liveDialogue(state, { type: 'observe', world: second, selected: null, focus: 2 })).toBe(
+      state,
+    );
+  });
 });

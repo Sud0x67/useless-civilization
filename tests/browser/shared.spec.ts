@@ -33,11 +33,16 @@ test.afterEach(async () => {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
-async function open(browser: Browser) {
+async function open(browser: Browser, freezeTime = false) {
   const context = await browser.newContext(test.info().project.use);
   contexts.push(context);
   const page = await context.newPage();
   await page.emulateMedia({ reducedMotion: 'reduce' });
+  if (freezeTime) {
+    const now = new Date();
+    await page.clock.install({ time: now });
+    await page.clock.pauseAt(new Date(now.getTime() + 1000));
+  }
   await page.goto(base);
   await expect(page.getByLabel('共享小镇状态')).toContainText('共享小镇 · 实时连接');
   await expect(page.getByLabel('共享小镇状态')).toContainText('今日参与 0/600');
@@ -49,6 +54,49 @@ const reply = (text: string) => ({
   decision: { ...decision, speech: text },
   round,
   usage: { input: 10, output: 20 },
+});
+
+test('live shared observation clears Soren focus and rotates all residents in subsequent rounds', async ({
+  browser,
+}) => {
+  const advance = (nextRound = round) => {
+    town.transaction(() => town.commit(applyRound(town.world, nextRound)));
+    town.publish();
+  };
+  advance();
+  const page = await open(browser, true);
+  const bubble = page.getByLabel('地图对白');
+  await page.getByRole('button', { name: '选择居民索伦', exact: true }).click();
+  await expect(bubble).toContainText(round.decisions[5].speech);
+  await page.getByRole('button', { name: '查看索伦', exact: true }).click();
+  for (const name of ['选择居民索伦', '查看索伦']) {
+    await expect(page.getByRole('button', { name, exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  }
+  await expect(page.locator('.live-pill')).toHaveText('LIVE');
+  for (const line of round.decisions.slice(1, 5)) {
+    await expect(bubble).toContainText(line.speech);
+    await page.clock.fastForward(3000);
+  }
+  await expect(bubble).toHaveCount(0);
+  const nextRound = {
+    ...round,
+    decisions: round.decisions.map((line) => ({ ...line, speech: `新一轮：${line.speech}` })),
+  };
+  advance(nextRound);
+  await expect(page.locator('.clock')).toContainText('08:30');
+  for (const line of nextRound.decisions) {
+    await expect(bubble).toContainText(line.speech);
+    await page.clock.fastForward(3000);
+  }
+  await expect(bubble).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '选择居民索伦', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  await expect(page.getByLabel('模型累计用量')).toContainText('0 次调用');
 });
 
 test('shared replay freezes its frames while the town advances and refreshes history on return', async ({

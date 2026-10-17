@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { World } from '../shared/schema';
+import type { FeedItem, World } from '../shared/schema';
 import { formatDay, formatTime } from '../world/engine';
+import { dialogueDuration } from '../world/live-dialogue';
 import { Icon } from './Icons';
 
 const speeds = [0.5, 1, 2, 4];
@@ -9,6 +10,10 @@ const timestamp = (world: World) => `第 ${formatDay(world.minute)} 天 ${format
 export function WorldReplay({
   snapshots,
   position,
+  dialogueIndex,
+  dialogueCount,
+  dialogue,
+  onDialogue,
   visible,
   onSeek,
   onLive,
@@ -16,29 +21,54 @@ export function WorldReplay({
 }: {
   snapshots: World[];
   position: number | null;
+  dialogueIndex: number;
+  dialogueCount: number;
+  dialogue?: FeedItem;
+  onDialogue: (index: number) => void;
   visible: boolean;
   onSeek: (index: number) => void;
   onLive: () => void;
   onExport: () => void;
 }) {
   const [playing, setPlaying] = useState(false);
+  const [completed, setCompleted] = useState(false);
   const [speed, setSpeed] = useState(1);
   const last = snapshots.length - 1;
   const index = Math.min(position ?? last, last);
   const canReplay = last > 0;
+  const duration = dialogue ? dialogueDuration(dialogue.text) : 1000;
+  const dialogueId = dialogue?.id;
 
   useEffect(() => {
     if (!playing || position === null || !visible) return;
     const timer = window.setTimeout(() => {
-      const next = Math.min(position + 1, last);
-      onSeek(next);
-      if (next === last) setPlaying(false);
-    }, 1000 / speed);
+      if (dialogueIndex + 1 < dialogueCount) {
+        onDialogue(dialogueIndex + 1);
+      } else if (position < last) {
+        onSeek(position + 1);
+      } else {
+        setPlaying(false);
+        setCompleted(true);
+      }
+    }, duration / speed);
     return () => window.clearTimeout(timer);
-  }, [playing, position, visible, last, speed, onSeek]);
+  }, [
+    playing,
+    position,
+    visible,
+    last,
+    speed,
+    onSeek,
+    dialogueIndex,
+    dialogueCount,
+    dialogueId,
+    duration,
+    onDialogue,
+  ]);
 
   function seek(value: number) {
     setPlaying(false);
+    setCompleted(false);
     onSeek(Math.max(0, Math.min(value, last)));
   }
   const progress = `${timestamp(snapshots[index])} · ${index + 1}/${snapshots.length}`;
@@ -54,6 +84,7 @@ export function WorldReplay({
           <button
             onClick={() => {
               setPlaying(false);
+              setCompleted(false);
               onLive();
             }}
           >
@@ -103,7 +134,8 @@ export function WorldReplay({
               setPlaying(false);
               return;
             }
-            if (position === null || index === last) onSeek(0);
+            if (position === null || (index === last && completed)) onSeek(0);
+            setCompleted(false);
             setPlaying(true);
           }}
         >
@@ -123,7 +155,7 @@ export function WorldReplay({
         </output>
         <select
           aria-label="回放倍速"
-          title="1× 每秒播放一个瞬间"
+          title="1× 每句对白停留 3–6 秒"
           value={speed}
           onChange={(event) => setSpeed(Number(event.target.value))}
         >

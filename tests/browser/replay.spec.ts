@@ -57,15 +57,26 @@ test('replay supports seeking, single frames, all speeds and stops at the end wi
     await expect(slider).toHaveValue('0');
     await page.clock.fastForward(1);
     await expect(slider).toHaveValue('1');
+    await expect(page.getByLabel('地图对白')).toContainText(round.decisions[0].speech);
+    await page.clock.fastForward(duration * 3 - 1);
+    await expect(page.getByLabel('地图对白')).toContainText(round.decisions[0].speech);
+    await page.clock.fastForward(1);
+    await expect(page.getByLabel('地图对白')).toContainText(round.decisions[1].speech);
     await page.getByRole('button', { name: '暂停回放', exact: true }).click();
     await page.clock.fastForward(duration * 2);
     await expect(slider).toHaveValue('1');
   }
+  await slider.focus();
+  await slider.press('Home');
   await page.getByRole('button', { name: '播放回放', exact: true }).click();
-  // Advance one recorded frame at a time; skip unrelated Three.js animation frames.
-  for (let index = 2; index <= 5; index++) {
-    await page.clock.fastForward(250);
-    await expect(slider).toHaveValue(String(index));
+  await page.clock.fastForward(250);
+  // Every resident gets a turn before moving to the next snapshot.
+  for (let index = 1; index <= 5; index++) {
+    for (const entry of round.decisions) {
+      await expect(page.getByLabel('地图对白')).toContainText(entry.speech);
+      await page.clock.fastForward(750);
+    }
+    await expect(slider).toHaveValue(String(Math.min(index + 1, 5)));
   }
   await expect(progress).toContainText('09:15 · 6/6');
   await expect(page.getByRole('button', { name: '播放回放', exact: true })).toBeVisible();
@@ -115,7 +126,7 @@ test('map dialogue appears automatically during replay and distinguishes human i
   await page.getByRole('button', { name: '播放回放', exact: true }).click();
   await page.clock.fastForward(1000);
   await expect(bubble).toBeVisible();
-  await expect(bubble).toContainText(round.decisions.at(-1)!.speech);
+  await expect(bubble).toContainText(round.decisions[0].speech);
   await page.getByRole('button', { name: '暂停回放', exact: true }).click();
   await page.getByRole('button', { name: '查看米拉', exact: true }).click();
   await expect(bubble).toContainText(round.decisions[0].speech);
@@ -127,5 +138,60 @@ test('map dialogue appears automatically during replay and distinguishes human i
   await expect(bubble).toContainText(decision.speech);
   await page.getByRole('button', { name: '上一帧', exact: true }).click();
   await expect(bubble).toContainText('回放中的人类消息 👋');
+  expect(calls()).toBe(0);
+});
+
+test('cancelling Soren focus replays all residents, with pause, speed changes and seeking', async ({
+  page,
+}) => {
+  const calls = await prepare(page, 3);
+  const bubble = page.getByLabel('地图对白');
+  const slider = page.getByRole('slider', { name: '回放时间线' });
+  const soren = page.getByRole('button', { name: '查看索伦', exact: true });
+  const rate = page.getByRole('combobox', { name: '回放倍速' });
+  await page.getByRole('button', { name: '下一帧', exact: true }).click();
+  await soren.click();
+  await expect(soren).toHaveAttribute('aria-pressed', 'true');
+  await expect(bubble).toContainText(round.decisions[5].speech);
+  await page.getByRole('button', { name: '播放回放', exact: true }).click();
+  await page.clock.fastForward(1000);
+  await soren.click();
+  await expect(soren).toHaveAttribute('aria-pressed', 'false');
+  await expect(bubble).toContainText(round.decisions[0].speech);
+  await page.clock.fastForward(2999);
+  await expect(bubble).toContainText(round.decisions[0].speech);
+  await page.clock.fastForward(1);
+  await expect(bubble).toContainText(round.decisions[1].speech);
+  await expect(slider).toHaveValue('1');
+  await page.getByRole('button', { name: '暂停回放', exact: true }).click();
+  await page.clock.fastForward(20000);
+  await expect(bubble).toContainText(round.decisions[1].speech);
+  await rate.selectOption('2');
+  await page.getByRole('button', { name: '播放回放', exact: true }).click();
+  for (let i = 2; i < 6; i++) {
+    await page.clock.fastForward(1499);
+    await expect(bubble).toContainText(round.decisions[i - 1].speech);
+    await page.clock.fastForward(1);
+    await expect(bubble).toContainText(round.decisions[i].speech);
+    await expect(slider).toHaveValue('1');
+  }
+  await page.clock.fastForward(1500);
+  await expect(slider).toHaveValue('2');
+  await expect(bubble).toContainText(round.decisions[0].speech);
+  await page.getByRole('button', { name: '暂停回放', exact: true }).click();
+  await page.clock.fastForward(10000);
+  await expect(bubble).toContainText(round.decisions[0].speech);
+  await page.getByRole('button', { name: '播放回放', exact: true }).click();
+  await expect(slider).toHaveValue('2');
+  await page.clock.fastForward(1500);
+  await expect(bubble).toContainText(round.decisions[1].speech);
+  // Seeking to an earlier snapshot resets its dialogue cursor and pauses the player.
+  await slider.focus();
+  await slider.press('ArrowLeft');
+  await expect(slider).toHaveValue('1');
+  await expect(bubble).toContainText(round.decisions[0].speech);
+  await page.clock.fastForward(10000);
+  await expect(bubble).toContainText(round.decisions[0].speech);
+  await expect(page.getByRole('button', { name: '播放回放', exact: true })).toBeVisible();
   expect(calls()).toBe(0);
 });

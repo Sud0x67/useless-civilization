@@ -16,7 +16,7 @@ import { MapDialogue } from './components/MapDialogue';
 import { useSharedTown } from './hooks/useSharedTown';
 import type { TownAction } from './shared/town';
 import { RequestScheduler, type ScheduledTask } from './world/request-scheduler';
-import { frameDialogue } from './world/replay-dialogue';
+import { frameDialogues } from './world/replay-dialogue';
 import { DecisionSchema, RoundSchema, type Agent, type World } from './shared/schema';
 import {
   addHumanMessage,
@@ -128,6 +128,7 @@ export function App() {
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [replaySource, setReplaySource] = useState(0);
   const [replay, setReplay] = useState<number | null>(null);
+  const [replayDialogue, setReplayDialogue] = useState(0);
   const replayRef = useRef<number | null>(null);
   const [selected, setSelected] = useState<AgentId | null>(null);
   const [speechFocus, setSpeechFocus] = useState(0);
@@ -272,6 +273,7 @@ export function App() {
       const next = selected === id ? null : id;
       setSelected(next);
       setSpeechFocus((value) => value + 1);
+      setReplayDialogue(0);
       setPanel(next ? 'resident' : 'feed');
       if (next) setResidentTab('chat');
       idleSince.current = Date.now();
@@ -467,8 +469,8 @@ export function App() {
         : world
       : snapshots[replay] || world;
   const agent = view.agents.find((a) => a.id === selected) || null;
-  const replayLine =
-    replay === null ? undefined : frameDialogue(view, snapshots[replay - 1], selected);
+  const replayLines = replay === null ? [] : frameDialogues(view, snapshots[replay - 1], selected);
+  const replayLine = replayLines[replayDialogue];
   const interactionLocked =
     replay !== null ||
     !status?.configured ||
@@ -482,12 +484,14 @@ export function App() {
       pause(true);
       replayRef.current = index;
       setReplay(index);
+      setReplayDialogue(0);
     },
     [scheduler, pause],
   );
   function leaveReplay() {
     replayRef.current = null;
     setReplay(null);
+    setReplayDialogue(0);
     if (!document.hidden) scheduler.resume();
     if (sharedMode) {
       pause(false);
@@ -535,6 +539,7 @@ export function App() {
       setWorld(last);
       replayRef.current = 0;
       setReplay(0);
+      setReplayDialogue(0);
       setModal(null);
       setConnectionError('');
       setNotice('回放已导入。');
@@ -562,6 +567,7 @@ export function App() {
     setReplaySource((value) => value + 1);
     replayRef.current = null;
     setReplay(null);
+    setReplayDialogue(0);
     setConnectionError('');
     setModal(null);
     setNotice('小镇已重置。');
@@ -975,6 +981,10 @@ export function App() {
             key={replaySource}
             snapshots={snapshots}
             position={replay}
+            dialogueIndex={replayDialogue}
+            dialogueCount={replayLines.length}
+            dialogue={replayLine}
+            onDialogue={setReplayDialogue}
             visible={visible}
             onSeek={enterReplay}
             onLive={leaveReplay}
