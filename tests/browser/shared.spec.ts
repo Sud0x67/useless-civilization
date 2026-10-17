@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { SharedTown } from '../../server/town.mjs';
 import { createHandler } from '../../server/app.mjs';
 import { decision, round } from '../fixture';
+import { applyRound } from '../../src/world/engine';
 
 let server: Server, town: SharedTown, base: string;
 let pending: Array<{ resolve: (value: object) => void; body: { prompt?: string } }>;
@@ -48,6 +49,37 @@ const reply = (text: string) => ({
   decision: { ...decision, speech: text },
   round,
   usage: { input: 10, output: 20 },
+});
+
+test('shared replay freezes its frames while the town advances and refreshes history on return', async ({
+  browser,
+}) => {
+  const advance = () => {
+    town.transaction(() => town.commit(applyRound(town.world, round)));
+    town.publish();
+  };
+  advance();
+  advance();
+  const alice = await open(browser),
+    bob = await open(browser);
+  const slider = alice.getByRole('slider', { name: '回放时间线' });
+  await expect(slider).toHaveAttribute('max', '2');
+  await slider.focus();
+  await slider.press('Home');
+  await expect(alice.getByLabel('回放进度')).toHaveText('第 1 天 08:00 · 1/3');
+  advance();
+  advance();
+  await expect(bob.locator('.clock')).toContainText('09:00');
+  await expect(alice.locator('.clock')).toContainText('08:00');
+  await expect(slider).toHaveAttribute('max', '2');
+  await expect(alice.getByRole('button', { name: '投放事件', exact: true })).toBeDisabled();
+  await alice.getByRole('button', { name: '返回当前世界', exact: true }).click();
+  await expect(alice.locator('.clock')).toContainText('09:00');
+  await expect(slider).toHaveAttribute('max', '4');
+  await slider.focus();
+  await slider.press('Home');
+  await expect(alice.getByLabel('回放进度')).toHaveText('第 1 天 08:00 · 1/5');
+  await expect(alice.getByLabel('模型累计用量')).toContainText('0 次调用');
 });
 
 test('anonymous visitors share FIFO conversations and reconnect to the same saved town', async ({

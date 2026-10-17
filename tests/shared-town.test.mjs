@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { SharedTown } from '../server/town.mjs';
 import { createHandler } from '../server/app.mjs';
 import { TownStore } from '../server/store.mjs';
+import { applyRound, createWorld, exportReplay, importReplay } from '../src/world/engine.ts';
 import { round, decision } from './fixture.ts';
 
 const owned = [],
@@ -52,6 +53,23 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 describe('shared authoritative town', () => {
+  it('retains the latest 200 feed entries in SQLite, history and exported replays', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'town-feed-'));
+    dirs.push(dir);
+    const path = join(dir, 'world.sqlite');
+    let world = createWorld();
+    for (let i = 0; i < 40; i++) world = applyRound(world, round);
+    const first = setup({ path });
+    first.transaction(() => first.commit(world));
+    first.close();
+    const restored = setup({ path });
+    expect(restored.world.feed).toHaveLength(200);
+    expect(restored.world.feed).toEqual(world.feed);
+    const base = await serve(restored);
+    const history = await (await fetch(base + '/api/history')).json();
+    expect(history.snapshots.at(-1).feed).toEqual(world.feed);
+    expect(importReplay(exportReplay(history.snapshots)).at(-1).feed).toEqual(world.feed);
+  });
   it('serializes two visitors and broadcasts identical committed worlds without overwriting either chat', async () => {
     const requests = [],
       statesA = [],

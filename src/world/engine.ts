@@ -2,6 +2,7 @@ import {
   DecisionSchema,
   RoundSchema,
   ReplaySchema,
+  FEED_LIMIT,
   type Round,
   type Agent,
   type Decision,
@@ -168,7 +169,7 @@ export function addFeed(
     type,
     source,
   });
-  w.feed = w.feed.slice(0, 90);
+  w.feed = w.feed.slice(0, FEED_LIMIT);
 }
 function remember(a: Agent, text: string) {
   a.memories = [text.slice(0, 300), ...a.memories].slice(0, 12);

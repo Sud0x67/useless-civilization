@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { Agent, World } from '../shared/schema';
+import { FEED_LIMIT } from '../shared/schema';
 import { formatTime, places } from '../world/engine';
 import { Icon } from './Icons';
 
@@ -65,7 +66,7 @@ export function ActivityFeed({
       <div className="feed-intro">
         <span className="tiny-dot" />
         小镇里发生的那些小事
-        <span>按时间顺序</span>
+        <span>最新 {FEED_LIMIT} 条</span>
       </div>
       <div
         className="feed-list"

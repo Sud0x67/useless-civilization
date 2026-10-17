@@ -47,6 +47,18 @@ test('starts with real-model mode, applies a batch, selects residents and contro
   await page.getByRole('button', { name: '选择居民米拉' }).click();
   await expect(page.locator('.profile-hero h2')).toContainText('米拉');
   await expect(page.locator('.speech-preview')).toContainText(round.decisions[0].speech);
+  await page.getByRole('button', { name: '选择居民米拉', exact: true }).click();
+  await expect(page.getByRole('button', { name: '选择居民米拉', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  await expect(page.getByRole('button', { name: '查看米拉', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  await expect(page.getByRole('button', { name: /小镇动态/ })).toHaveClass('active');
+  await expect(page.locator('.profile-hero')).toHaveCount(0);
+  await page.getByRole('button', { name: '选择居民米拉', exact: true }).click();
   await page.getByRole('button', { name: '放大地图', exact: true }).click();
   await page.getByRole('button', { name: '重置视角' }).click();
   await page.getByRole('button', { name: '切换白天灯光' }).click();
@@ -239,6 +251,13 @@ test('lightweight fallback keeps resident selection and zoom controls functional
   await expect(page.locator('.town-canvas')).toHaveAttribute('data-renderer', 'fallback');
   await page.getByRole('button', { name: '查看米拉', exact: true }).click();
   await expect(page.locator('.profile-hero')).toContainText('米拉');
+  await page.getByRole('button', { name: '查看米拉', exact: true }).click();
+  await expect(page.getByRole('button', { name: '查看米拉', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  await expect(page.getByRole('button', { name: /小镇动态/ })).toHaveClass('active');
+  await page.getByRole('button', { name: '查看米拉', exact: true }).click();
   await page.getByRole('button', { name: '放大地图', exact: true }).click();
   expect(
     await page

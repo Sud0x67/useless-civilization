@@ -11,9 +11,12 @@ import { Town, type CameraControls } from './components/Town';
 import { Icon } from './components/Icons';
 import { Conversation } from './components/Conversation';
 import { ActivityFeed } from './components/ActivityFeed';
+import { WorldReplay } from './components/WorldReplay';
+import { MapDialogue } from './components/MapDialogue';
 import { useSharedTown } from './hooks/useSharedTown';
 import type { TownAction } from './shared/town';
 import { RequestScheduler, type ScheduledTask } from './world/request-scheduler';
+import { frameDialogue } from './world/replay-dialogue';
 import { DecisionSchema, RoundSchema, type Agent, type World } from './shared/schema';
 import {
   addHumanMessage,
@@ -121,9 +124,13 @@ export function App() {
   const worldRef = useRef(world);
   const [snapshots, setSnapshots] = useState<World[]>([world]);
   const snapshotsRef = useRef(snapshots);
+  const historyVersion = useRef(0);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
+  const [replaySource, setReplaySource] = useState(0);
   const [replay, setReplay] = useState<number | null>(null);
   const replayRef = useRef<number | null>(null);
   const [selected, setSelected] = useState<AgentId | null>(null);
+  const [speechFocus, setSpeechFocus] = useState(0);
   const [panel, setPanel] = useState<'feed' | 'resident'>('feed');
   const [residentTab, setResidentTab] = useState<'chat' | 'details'>('chat');
   const [status, setStatus] = useState<Status | null>(null);
@@ -226,17 +233,20 @@ export function App() {
           !Array.isArray(data.snapshots)
         )
           return;
-        const history = (
-          sharedVersion.current > data.version
-            ? [...data.snapshots, worldRef.current]
-            : data.snapshots
-        ).slice(-120) as World[];
+        // History and SSE can arrive in either order. Keep newer frames without
+        // adding the same server version twice when the initial stream arrives.
+        const newer = Math.max(0, historyVersion.current - data.version);
+        const history = [
+          ...data.snapshots,
+          ...(newer ? snapshotsRef.current.slice(-newer) : []),
+        ].slice(-120) as World[];
+        historyVersion.current = Math.max(historyVersion.current, data.version);
         snapshotsRef.current = history;
         setSnapshots(history);
       })
       .catch(() => {});
     return () => controller.abort();
-  }, [sharedMode]);
+  }, [sharedMode, historyRefresh]);
   const pause = useCallback((value: boolean) => {
     pausedWorld.current = value ? worldRef.current : null;
     setPaused(value);
@@ -249,19 +259,25 @@ export function App() {
     worldRef.current = sharedData.world;
     setWorld(sharedData.world);
     // Freeze the replay index while viewing history; live state still stays up to date.
-    if (replayRef.current === null) {
+    if (replayRef.current === null && sharedData.version > historyVersion.current) {
       const history = [...snapshotsRef.current, sharedData.world].slice(-120);
       snapshotsRef.current = history;
+      historyVersion.current = sharedData.version;
       setSnapshots(history);
     }
   }, [sharedData, paused]);
   const cancel = useCallback(() => scheduler.clear(), [scheduler]);
-  const select = useCallback((id: AgentId) => {
-    setSelected(id);
-    setPanel('resident');
-    setResidentTab('chat');
-    idleSince.current = Date.now();
-  }, []);
+  const select = useCallback(
+    (id: AgentId) => {
+      const next = selected === id ? null : id;
+      setSelected(next);
+      setSpeechFocus((value) => value + 1);
+      setPanel(next ? 'resident' : 'feed');
+      if (next) setResidentTab('chat');
+      idleSince.current = Date.now();
+    },
+    [selected],
+  );
 
   executeRef.current = async (task, signal) => {
     if (signal.aborted) return;
@@ -451,6 +467,8 @@ export function App() {
         : world
       : snapshots[replay] || world;
   const agent = view.agents.find((a) => a.id === selected) || null;
+  const replayLine =
+    replay === null ? undefined : frameDialogue(view, snapshots[replay - 1], selected);
   const interactionLocked =
     replay !== null ||
     !status?.configured ||
@@ -458,21 +476,28 @@ export function App() {
   const disabled = busy || humanPending || interactionLocked;
   const message = selected ? drafts[selected] || '' : '';
   const joinPending = humanTasks.some((t) => t.action.type === 'join');
-  function enterReplay(index: number) {
-    scheduler.suspend();
-    pause(true);
-    replayRef.current = index;
-    setReplay(index);
-  }
+  const enterReplay = useCallback(
+    (index: number) => {
+      scheduler.suspend();
+      pause(true);
+      replayRef.current = index;
+      setReplay(index);
+    },
+    [scheduler, pause],
+  );
   function leaveReplay() {
     replayRef.current = null;
     setReplay(null);
     if (!document.hidden) scheduler.resume();
     if (sharedMode) {
       pause(false);
-      const history = [...snapshotsRef.current, worldRef.current].slice(-120);
-      snapshotsRef.current = history;
-      setSnapshots(history);
+      if (sharedVersion.current > historyVersion.current) {
+        const history = [...snapshotsRef.current, worldRef.current].slice(-120);
+        snapshotsRef.current = history;
+        historyVersion.current = sharedVersion.current;
+        setSnapshots(history);
+      }
+      setHistoryRefresh((value) => value + 1);
     }
   }
   async function event(id: EventId) {
@@ -505,6 +530,7 @@ export function App() {
       snapshotsRef.current = history;
       setSnapshots(history);
       const last = history.at(-1)!;
+      setReplaySource((value) => value + 1);
       worldRef.current = last;
       setWorld(last);
       replayRef.current = 0;
@@ -533,6 +559,7 @@ export function App() {
     setWorld(next);
     snapshotsRef.current = [next];
     setSnapshots([next]);
+    setReplaySource((value) => value + 1);
     replayRef.current = null;
     setReplay(null);
     setConnectionError('');
@@ -675,15 +702,15 @@ export function App() {
                 night={night}
                 controlsRef={camera}
               />
-              {agent?.speech && (
-                <div className="speech-preview" style={{ '--agent': agent.color } as CSSProperties}>
-                  <span className="speech-name">
-                    {agent.name}
-                    <small>AI</small>
-                  </span>
-                  <p>“{agent.speech}”</p>
-                </div>
-              )}
+              <MapDialogue
+                world={view}
+                selected={selected}
+                focus={speechFocus}
+                replaying={replay !== null}
+                replayLine={replayLine}
+                running={!paused}
+                visible={visible}
+              />
               <div className="scene-caption">
                 <span className="tiny-dot" />
                 {view.effects.length ? '世界正在经历一点小变化' : '风很轻，一切皆有可能'}
@@ -944,37 +971,15 @@ export function App() {
               )}
             </div>
           )}
-          <div className="timeline">
-            <div className="timeline-title">
-              <span>
-                <Icon name="history" size={14} />
-                世界回放
-              </span>
-              <small>{snapshots.length} 个瞬间</small>
-              {replay !== null && (
-                <button onClick={leaveReplay}>
-                  返回当前世界
-                  <Icon name="arrow" size={12} />
-                </button>
-              )}
-            </div>
-            <div className="timeline-track">
-              <span>{formatTime(snapshots[0].minute)}</span>
-              <input
-                type="range"
-                min="0"
-                max={Math.max(1, snapshots.length - 1)}
-                value={replay ?? snapshots.length - 1}
-                disabled={snapshots.length < 2}
-                aria-label="回放时间线"
-                onChange={(e) =>
-                  enterReplay(Math.min(Number(e.target.value), snapshots.length - 1))
-                }
-              />
-              <span>{formatTime(snapshots.at(-1)!.minute)}</span>
-              <ToolButton label="导出回放" icon="download" onClick={download} />
-            </div>
-          </div>
+          <WorldReplay
+            key={replaySource}
+            snapshots={snapshots}
+            position={replay}
+            visible={visible}
+            onSeek={enterReplay}
+            onLive={leaveReplay}
+            onExport={download}
+          />
           {replay !== null && (
             <div className="world-footnote">回放中，返回当前世界后可继续互动。</div>
           )}

@@ -4,6 +4,8 @@ const paths: Record<string, string> = {
   play: 'm8 5 11 7-11 7z',
   pause: 'M8 5v14M16 5v14',
   skip: 'm5 5 10 7-10 7zM19 5v14',
+  'step-back': 'M5 5v14M19 5 9 12l10 7z',
+  'step-forward': 'm5 5 10 7-10 7zM19 5v14',
   crown: 'm3 7 4 4 5-7 5 7 4-4-2 12H5z',
   spark: 'm12 2 2.8 7.2L22 12l-7.2 2.8L12 22l-2.8-7.2L2 12l7.2-2.8z',
   ban: 'M5 5l14 14M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0',

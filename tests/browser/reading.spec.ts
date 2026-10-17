@@ -21,15 +21,15 @@ async function prepare(page: Page) {
 }
 async function fullTimeline(page: Page) {
   const world = createWorld();
-  world.feed = Array.from({ length: 90 }, (_, index) => ({
-    id: 90 - index,
+  world.feed = Array.from({ length: 200 }, (_, index) => ({
+    id: 200 - index,
     minute: 480,
     type: 'social' as const,
     actor: 'mira' as const,
-    text: `历史动态 ${90 - index}：小镇今天发生的故事。`,
+    text: `历史动态 ${200 - index}：小镇今天发生的故事。`,
     source: 'model' as const,
   }));
-  world.nextId = 91;
+  world.nextId = 201;
   await page.getByLabel('导入回放文件').setInputFiles({
     name: 'history.json',
     mimeType: 'application/json',
@@ -50,15 +50,15 @@ test('town activity reads oldest to newest and follows new entries at the bottom
   await fullTimeline(page);
   const rows = page.locator('.feed-item');
   await expect(rows.first()).toHaveAttribute('data-feed-id', '1');
-  await expect(rows.last()).toHaveAttribute('data-feed-id', '90');
+  await expect(rows.last()).toHaveAttribute('data-feed-id', '200');
   expect(await bottomGap(page)).toBeLessThanOrEqual(1);
   await page.getByRole('button', { name: '运行一轮', exact: true }).click();
   await expect(page.locator('.clock')).toContainText('08:15');
   await expect(rows.first()).toHaveAttribute('data-feed-id', '7');
-  await expect(rows.last()).toHaveAttribute('data-feed-id', '96');
+  await expect(rows.last()).toHaveAttribute('data-feed-id', '206');
   expect(
     await rows.evaluateAll((els) => els.map((el) => Number((el as HTMLElement).dataset.feedId))),
-  ).toEqual(Array.from({ length: 90 }, (_, i) => i + 7));
+  ).toEqual(Array.from({ length: 200 }, (_, i) => i + 7));
   expect(await bottomGap(page)).toBeLessThanOrEqual(1);
   await expect(page.getByRole('button', { name: '正在跟随最新动态', exact: true })).toBeDisabled();
 });

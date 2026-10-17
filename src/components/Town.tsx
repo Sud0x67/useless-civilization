@@ -571,6 +571,7 @@ export function Town({
             }
             onClick={() => onSelect(a.id)}
             aria-label={`查看${a.name}`}
+            aria-pressed={selected === a.id}
           >
             <i />
             {a.name}

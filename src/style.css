@@ -849,6 +849,7 @@ p {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 .timeline-title > span {
   display: flex;
@@ -882,10 +883,12 @@ p {
     8px ui-monospace,
     monospace;
   color: #647e72;
+  white-space: nowrap;
 }
 .timeline-track input {
-  width: 100%;
-  height: 3px;
+  flex: 1;
+  min-width: 0;
+  height: 24px;
   accent-color: #b8d6b7;
   cursor: pointer;
 }
@@ -896,6 +899,40 @@ p {
 .timeline-track .icon-button svg {
   width: 14px;
   height: 14px;
+}
+.replay-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.replay-controls .icon-button {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+.replay-controls .replay-play {
+  color: #b8d6b7;
+  border-color: #40574a;
+  background: #1b3027;
+}
+.replay-progress {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: #a2b4ad;
+  margin-left: 4px;
+}
+.replay-controls select {
+  min-height: 36px;
+  margin-left: auto;
+  border: 1px solid #314338;
+  border-radius: 6px;
+  background: #121a20;
+  color: #b8d6b7;
+  padding: 0 6px;
+  font-size: 11px;
+  cursor: pointer;
 }
 .world-footnote {
   display: flex;

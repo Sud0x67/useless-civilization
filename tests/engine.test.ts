@@ -53,7 +53,11 @@ describe('model-only world', () => {
     let world = createWorld();
     for (let i = 0; i < 240; i++) world = applyRound(world, round);
     expect(WorldSchema.safeParse(world).success).toBe(true);
-    expect(world.feed.length).toBeLessThanOrEqual(90);
+    expect(world.feed).toHaveLength(200);
+    expect(new Set(world.feed.map((entry) => entry.id)).size).toBe(200);
+    expect(world.feed.map((entry) => entry.id)).toEqual(
+      [...world.feed].sort((a, b) => b.id - a.id).map((entry) => entry.id),
+    );
     expect(world.agents.every((a) => a.memories.length <= 12)).toBe(true);
   });
   it('applies world events without fabricating resident responses', () => {
@@ -154,7 +158,7 @@ describe('resident conversations', () => {
       { action: 'socialize', location: 'square', speech: '欢迎来到星落镇。', reason: '接待人类' },
       id,
     );
-    for (let i = 0; i < 30; i++) world = applyRound(world, round);
+    for (let i = 0; i < 40; i++) world = applyRound(world, round);
     expect(world.feed.some((e) => e.id === id)).toBe(false);
     expect(world.conversations).toHaveLength(2);
     expect(world.conversations[1]).toMatchObject({

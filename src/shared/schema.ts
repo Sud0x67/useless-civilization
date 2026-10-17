@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export const FEED_LIMIT = 200;
 export const IDS = ['mira', 'otto', 'lin', 'ada', 'echo', 'soren'] as const;
 export const PLACES = ['square', 'hall', 'market', 'farm', 'workshop', 'cafe', 'garden'] as const;
 export const ACTIONS = ['work', 'rest', 'socialize', 'wander'] as const;
@@ -65,7 +66,7 @@ export const WorldSchema = z.object({
   effects: z
     .array(z.object({ id: z.enum(EVENT_IDS), until: z.number().int().nonnegative() }))
     .max(6),
-  feed: z.array(FeedSchema).max(90),
+  feed: z.array(FeedSchema).max(FEED_LIMIT),
   nextId: z.number().int().nonnegative(),
   human: z.boolean(),
   conversations: z
